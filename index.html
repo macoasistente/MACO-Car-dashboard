@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex, nofollow"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><link rel="manifest" href="manifest.webmanifest"><link rel="apple-touch-icon" href="icons/icon-192.png"><link rel="icon" href="icons/icon-192.png"></head><body>
-<title>Sophie's Dashboard</title>
+<title>MyDash</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <meta name="theme-color" content="#05070c">
 <style>
@@ -76,6 +76,7 @@ body.alert .ambient i:nth-child(2) { background: #6b1d1d; }
 
 /* header */
 header.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 4px 2px; }
+.brand small .by { font-size: 9px; letter-spacing: .06em; opacity: .7; font-weight: 500; text-transform: none; }
 .brand small { display: block; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--fg-3); font-weight: 600; }
 .brand h1 { margin: 0; font-family: var(--font-display); font-size: 26px; font-weight: 700; letter-spacing: -.02em; }
 .pill {
@@ -380,7 +381,7 @@ nav.tabs {
 
 <div class="wrap">
   <header class="top">
-    <div class="brand"><small>Sophie's Dashboard</small><h1 id="viewTitle">Overview</h1></div>
+    <div class="brand"><small><span id="brandName">MyDash</span><span class="by"> by MACO Asistente</span></small><h1 id="viewTitle">Overview</h1></div>
     <div class="hdr-actions"><button class="pill" id="connBtn" type="button"><span class="dot" id="connDot"></span><span id="connTxt">Connect</span></button><button class="pill icon" id="setupBtn" type="button" aria-label="Setup"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg></button></div>
   </header>
 
@@ -587,7 +588,7 @@ nav.tabs {
     </div>
     <div class="glass card-pad">
       <div style="font-weight:650">Backup</div>
-      <p class="muted">Everything is saved only on this phone. Save a backup file to move your cars, records, oil log and mileage to another phone, or between Chrome and the Sophie app.</p>
+      <p class="muted">Everything is saved only on this phone. Save a backup file to move your cars, records, oil log and mileage to another phone, or between Chrome and the MyDash app.</p>
       <div class="btn-row"><button class="btn" id="backupBtn" type="button">Save a backup</button><label class="btn primary" for="restoreIn">Restore a backup</label></div>
       <input type="file" id="restoreIn" hidden>
     </div>
@@ -1512,8 +1513,8 @@ function applyCar() {
   $('carPhoto').hidden = $('carRefl').hidden = !src;
   $('carDrawing').hidden = !!src;
   $('carPhoto').alt = `${c.name}, a ${c.model}`;
-  document.querySelector('.brand small').textContent = `${c.name}'s Dashboard`;
-  document.title = `${c.name}'s Dashboard`;
+  $('brandName').textContent = `MyDash · ${c.name}`;
+  document.title = `MyDash · ${c.name}`;
   $('askBtn').lastChild.textContent = `Ask ${c.name} for a checkup`;
 }
 $('photoIn').onchange = () => {

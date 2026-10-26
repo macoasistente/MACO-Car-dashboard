@@ -35,6 +35,6 @@ jobs:
           cp android/app/build/outputs/apk/debug/app-debug.apk Sophie.apk
           gh release delete android-latest --yes --cleanup-tag || true
           gh release create android-latest Sophie.apk \
-            --title "Sophie for Android (build ${{ github.run_number }})" \
-            --notes "Install Sophie.apk on the Android phone. Built from ${{ github.sha }}." \
+            --title "MyDash for Android (build ${{ github.run_number }})" \
+            --notes "Install Sophie.apk (MyDash) on the Android phone. Built from ${{ github.sha }}." \
             --prerelease

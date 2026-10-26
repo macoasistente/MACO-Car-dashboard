@@ -36,7 +36,7 @@ object Hub {
     data class CodeInfo(val code: String, val title: String, val drive: String, val sev: String)
     data class Alert(val text: String, val sev: String)
     data class CarInfo(
-        val name: String = "Sophie",
+        val name: String = "My car",
         val units: String = "us",
         val odoMi: Double? = null,
         val alerts: List<Alert> = emptyList(),
@@ -86,7 +86,7 @@ object Hub {
         val al = o.optJSONArray("alerts") ?: JSONArray()
         val cs = o.optJSONArray("codes") ?: JSONArray()
         CarInfo(
-            name = o.optString("name", "Sophie"),
+            name = o.optString("name", "My car"),
             units = o.optString("units", "us"),
             odoMi = if (o.isNull("odoMi") || !o.has("odoMi")) null else o.getDouble("odoMi"),
             alerts = (0 until al.length()).map { al.getJSONObject(it).let { a -> Alert(a.optString("t"), a.optString("cls")) } },

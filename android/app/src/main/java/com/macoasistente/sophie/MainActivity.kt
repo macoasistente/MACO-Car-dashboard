@@ -177,7 +177,7 @@ class MainActivity : AppCompatActivity() {
     /** Downloads the new version inside the app, then hands it to Android's installer. */
     private fun downloadUpdate() {
         if (Build.VERSION.SDK_INT >= 26 && !packageManager.canRequestPackageInstalls()) {
-            Toast.makeText(this, "Allow Sophie to install updates, then come back", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Allow MyDash to install updates, then come back", Toast.LENGTH_LONG).show()
             wantUpdate = true
             try {
                 startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
@@ -188,7 +188,7 @@ class MainActivity : AppCompatActivity() {
             getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)?.let { File(it, "Sophie-update.apk").delete() }
             val dm = getSystemService(DownloadManager::class.java)
             val req = DownloadManager.Request(Uri.parse(apkUrl))
-                .setTitle("Sophie update")
+                .setTitle("MyDash update")
                 .setMimeType("application/vnd.android.package-archive")
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
                 .setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, "Sophie-update.apk")
@@ -212,7 +212,7 @@ class MainActivity : AppCompatActivity() {
                         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK),
                 )
             } catch (_: Exception) {
-                Toast.makeText(ctx, "Open the Sophie update from your notifications to install it", Toast.LENGTH_LONG).show()
+                Toast.makeText(ctx, "Open the MyDash update from your notifications to install it", Toast.LENGTH_LONG).show()
             }
         }
     }
