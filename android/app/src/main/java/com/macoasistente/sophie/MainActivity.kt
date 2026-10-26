@@ -34,10 +34,14 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.webkit.WebViewAssetLoader
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 
 /** Phone screen: the same dashboard as the website, with Bluetooth handled by [ObdService]. */
 @SuppressLint("MissingPermission")
@@ -149,6 +153,34 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch { Hub.cluster.collect { js("cluster", JSONObject().put("type", "cluster").put("resp", it)) } }
 
         if (hasPerms()) afterPermissions() else askPerms.launch(perms)
+        checkForUpdate()
+    }
+
+    /** Asks GitHub whether a newer build of the app exists and offers to download it. */
+    private fun checkForUpdate() = lifecycleScope.launch(Dispatchers.IO) {
+        try {
+            val c = URL("https://api.github.com/repos/macoasistente/MACO-Car-dashboard/releases/tags/android-latest").openConnection() as HttpURLConnection
+            c.setRequestProperty("Accept", "application/vnd.github+json")
+            c.connectTimeout = 8000
+            c.readTimeout = 8000
+            val j = JSONObject(c.inputStream.bufferedReader().use { it.readText() })
+            val build = Regex("build (\\d+)").find(j.optString("name"))?.groupValues?.get(1)?.toIntOrNull() ?: return@launch
+            val prefs = getSharedPreferences("sophie", MODE_PRIVATE)
+            if (build <= BuildConfig.VERSION_CODE || prefs.getInt("skipBuild", 0) == build) return@launch
+            withContext(Dispatchers.Main) {
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("Update available")
+                    .setMessage("A newer version of the app is ready. Download it, then open the file to install. Your data stays.")
+                    .setPositiveButton("Download") { _, _ ->
+                        try {
+                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/macoasistente/MACO-Car-dashboard/releases/download/android-latest/Sophie.apk")))
+                        } catch (_: Exception) {}
+                    }
+                    .setNegativeButton("Later") { _, _ -> prefs.edit().putInt("skipBuild", build).apply() }
+                    .show()
+            }
+        } catch (_: Exception) {
+        }
     }
 
     private fun pushSnap(s: Hub.Snap) {
