@@ -123,6 +123,7 @@ class MainActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView, url: String) {
                 pageReady = true
                 pushSnap(Hub.state.value)
+                Hub.park.value?.let { js("park", JSONObject().put("type", "park").put("p", JSONObject(it))) }
             }
         }
         web.webChromeClient = object : WebChromeClient() {
@@ -157,6 +158,8 @@ class MainActivity : AppCompatActivity() {
             }
         }
         lifecycleScope.launch { Hub.logs.collect { js("log", JSONObject().put("type", "log").put("text", it)) } }
+        if (Hub.park.value == null) Hub.park.value = getSharedPreferences("sophie", MODE_PRIVATE).getString("park", null)
+        lifecycleScope.launch { Hub.park.collect { p -> if (p != null) js("park", JSONObject().put("type", "park").put("p", JSONObject(p))) } }
         lifecycleScope.launch { Hub.cluster.collect { js("cluster", JSONObject().put("type", "cluster").put("resp", it)) } }
 
         if (hasPerms()) afterPermissions() else askPerms.launch(perms)
@@ -332,6 +335,10 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface fun clearCodes() = ObdService.send(this@MainActivity, ObdService.ACTION_CLEAR_CODES)
 
         @JavascriptInterface fun setInfo(json: String) { Hub.parseInfo(json)?.let { Hub.info.value = it } }
+
+        @JavascriptInterface fun setAutoPark(on: Boolean) {
+            getSharedPreferences("sophie", MODE_PRIVATE).edit().putBoolean("autoPark", on).apply()
+        }
 
         @JavascriptInterface fun setPhoto(dataUrl: String) {
             try {

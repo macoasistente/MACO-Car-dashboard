@@ -46,6 +46,8 @@ object Hub {
     val state = MutableStateFlow(Snap())
     /** Photo of the active car, sent by the dashboard page. */
     val photo = MutableStateFlow<android.graphics.Bitmap?>(null)
+    /** Last auto-saved parking spot as JSON {t, lat, lng, acc}. */
+    val park = MutableStateFlow<String?>(null)
     val info = MutableStateFlow(CarInfo())
     val logs = MutableSharedFlow<String>(replay = 40, extraBufferCapacity = 64)
     val cluster = MutableSharedFlow<String>(extraBufferCapacity = 4)

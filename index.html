@@ -1057,6 +1057,12 @@ let nativeDist = null, nativeCodes = '';
 window.__sophieNative = (msg) => {
   if (msg.type === 'log') { log(msg.text); return; }
   if (msg.type === 'cluster') { parseClusterOdo(msg.resp); return; }
+  if (msg.type === 'park') {
+    // spot saved by the background service when the engine turned off
+    const p = msg.p, cur = loadPark();
+    if (p && p.t && (!cur || p.t > cur.t)) { store.set('park', { t: p.t, note: '', lat: p.lat ?? null, lng: p.lng ?? null, acc: p.acc ?? null }); renderPark(); }
+    return;
+  }
   if (msg.type !== 'snap') return;
   const s = msg.snap, was = st.mode;
   if (st.mode === 'demo') { if (s.mode === 'idle') return; stopDemo(); store.set('demo', false); resetAll(); }
@@ -1072,7 +1078,7 @@ window.__sophieNative = (msg) => {
     if (nativeDist != null && s.distKm > nativeDist && st.vals.odometer == null) addOdo((s.distKm - nativeDist) * 0.621371);
     nativeDist = s.distKm;
     tickTrip();
-  } else if (was === 'live') { fuelSeen = null; if (S.autoPark) saveParking(true); }
+  } else if (was === 'live') { fuelSeen = null; }
   const sb = $('scanBtn'); sb.disabled = !!s.scanning; sb.textContent = s.scanning ? 'Scanning…' : st.codes.scanned ? 'Scan again' : 'Scan for codes';
   const cj = JSON.stringify(st.codes); if (cj !== nativeCodes) { nativeCodes = cj; renderCodes(); }
   render();
@@ -1824,7 +1830,8 @@ function bindSeg(id, get, set) {
   sync();
 }
 bindSeg('unitSeg', () => S.units, (v) => { S.units = v; store.set('units', v); lastHeavy = 0; render(); renderPark(); renderCare(); });
-bindSeg('autoParkSeg', () => S.autoPark ? '1' : '0', (v) => { S.autoPark = v === '1'; store.set('autoPark', S.autoPark); });
+bindSeg('autoParkSeg', () => S.autoPark ? '1' : '0', (v) => { S.autoPark = v === '1'; store.set('autoPark', S.autoPark); if (NATIVE) try { SophieNative.setAutoPark(S.autoPark); } catch {} });
+if (NATIVE) try { SophieNative.setAutoPark(S.autoPark); } catch {}
 bindSeg('demoSeg', () => st.mode === 'demo' ? '1' : '0', (v) => {
   if (v === '1') { store.set('demo', true); startDemo(); } else { store.set('demo', false); stopDemo(); if (st.mode === 'demo') { st.mode = 'idle'; resetAll(); } }
 });

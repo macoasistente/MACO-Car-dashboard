@@ -15,7 +15,11 @@ import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.content.Context
 import android.content.Intent
+import android.Manifest
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.location.Location
+import android.location.LocationManager
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -37,6 +41,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONObject
 import java.util.UUID
 
 /**
@@ -111,27 +116,59 @@ class ObdService : Service() {
                     waiting -> "Waiting for ${Hub.info.value.name} to start"
                     else -> "Not connected"
                 }
-                startInForeground(text)
+                // update the text only; starting the foreground service again from the background isn't allowed
+                try { getSystemService(NotificationManager::class.java).notify(NOTIF_ID, notification(text)) } catch (_: Exception) {}
             }
         }
     }
 
-    private fun startInForeground(text: String) {
+    private fun notification(text: String): Notification {
         val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val n: Notification = NotificationCompat.Builder(this, CHANNEL)
+        return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(text)
             .setOngoing(true)
             .setContentIntent(open)
             .build()
-        val type = if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0
+    }
+
+    private fun startInForeground(text: String) {
+        val n = notification(text)
+        val bt = if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0
+        val loc = if (Build.VERSION.SDK_INT >= 29 && hasLocation()) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0
         try {
-            ServiceCompat.startForeground(this, NOTIF_ID, n, type)
+            // location lets the parking spot be saved with the phone locked
+            ServiceCompat.startForeground(this, NOTIF_ID, n, bt or loc)
         } catch (e: Exception) {
-            Hub.log("Foreground start failed: ${e.message}")
+            try { ServiceCompat.startForeground(this, NOTIF_ID, n, bt) } catch (e2: Exception) { Hub.log("Foreground start failed: ${e2.message}") }
+        }
+    }
+
+    private fun hasLocation() = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+    /** Saves where the car is when the adapter goes quiet (engine off). */
+    private fun saveParking() {
+        if (!getSharedPreferences("sophie", MODE_PRIVATE).getBoolean("autoPark", true) || !hasLocation()) return
+        val lm = getSystemService(LocationManager::class.java) ?: return
+        val store = { l: Location? ->
+            val p = JSONObject().put("t", System.currentTimeMillis())
+            if (l != null) p.put("lat", l.latitude).put("lng", l.longitude).put("acc", l.accuracy.toDouble())
+            getSharedPreferences("sophie", MODE_PRIVATE).edit().putString("park", p.toString()).apply()
+            Hub.park.value = p.toString()
+            Hub.log(if (l != null) "Parking spot saved" else "Parking: no GPS fix")
+        }
+        val provider = if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) LocationManager.GPS_PROVIDER else LocationManager.NETWORK_PROVIDER
+        try {
+            if (Build.VERSION.SDK_INT >= 30) {
+                lm.getCurrentLocation(provider, null, mainExecutor) { l -> store(l ?: lm.getLastKnownLocation(provider)) }
+            } else {
+                store(lm.getLastKnownLocation(provider))
+            }
+        } catch (e: Exception) {
+            Hub.log("Parking: location unavailable")
         }
     }
 
@@ -201,6 +238,7 @@ class ObdService : Service() {
                 try { pollLoop() } catch (e: Exception) { Hub.log("Link lost: ${e.message}") }
                 if (userStopped) return
                 Hub.log("Adapter disconnected, waiting for it to come back")
+                saveParking()
             }
             closeGatt()
             Hub.update { it.copy(mode = "idle", waiting = true) }
