@@ -36,7 +36,7 @@ class DashboardScreen(ctx: CarContext) : Screen(ctx) {
             }
         })
         lifecycleScope.launch {
-            Hub.state.combine(Hub.info) { s, i -> s to i }.sample(250).collect { (s, i) ->
+            combine(Hub.state, Hub.info, Hub.photo) { s, i, _ -> s to i }.sample(250).collect { (s, i) ->
                 renderer.update(s, i)
                 // the action strip shows Connect only when there's no link
                 if (s.mode != lastMode) { lastMode = s.mode; invalidate() }

@@ -1,7 +1,6 @@
 package com.macoasistente.sophie.car
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
@@ -17,7 +16,6 @@ import androidx.car.app.SurfaceCallback
 import androidx.car.app.SurfaceContainer
 import com.macoasistente.sophie.Hub
 import com.macoasistente.sophie.Obd
-import com.macoasistente.sophie.R
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -33,7 +31,7 @@ class DashboardRenderer(ctx: CarContext) : SurfaceCallback {
     private var visible: Rect? = null
     private var snap = Hub.Snap()
     private var info = Hub.CarInfo()
-    private val photo: Bitmap? = try { BitmapFactory.decodeResource(ctx.resources, R.drawable.sophie) } catch (_: Exception) { null }
+    private val photo: Bitmap? get() = Hub.photo.value
 
     private val OK = Color.rgb(48, 209, 88)
     private val WARN = Color.rgb(255, 214, 10)
@@ -158,10 +156,11 @@ class DashboardRenderer(ctx: CarContext) : SurfaceCallback {
         var carH = ah * 0.56f
         var carX = cx
         val carY = area.top + ah * 0.19f
+        val aspect = photo?.let { it.width.toFloat() / it.height } ?: (880f / 616f)
+        carH = min(ah * 0.56f, (R - L) * 0.40f / aspect)
+        carW = carH * aspect
+        carX = cx - carW / 2
         photo?.let { ph ->
-            carH = min(ah * 0.56f, (R - L) * 0.40f * ph.height / ph.width)
-            carW = carH * ph.width / ph.height
-            carX = cx - carW / 2
             fill.shader = RadialGradient(cx, carY + carH * 0.55f, carW * 0.75f, Color.argb(56, 10, 132, 255), Color.TRANSPARENT, Shader.TileMode.CLAMP)
             c.drawRect(0f, 0f, W, H, fill)
             fill.shader = LinearGradient(L, 0f, R, 0f, intArrayOf(Color.TRANSPARENT, Color.argb(46, 255, 255, 255), Color.TRANSPARENT), null, Shader.TileMode.CLAMP)
@@ -172,7 +171,7 @@ class DashboardRenderer(ctx: CarContext) : SurfaceCallback {
 
         // ---- callouts pointing at the car
         fun callout(fx: Float, fy: Float, lx: Float, ly: Float, leftAligned: Boolean, lab: String, value: String, unit: String, color: Int?) {
-            if (carW > 0) {
+            if (photo != null) {
                 val px = carX + fx * carW
                 val py = carY + fy * carH
                 stroke.color = Color.argb(90, 255, 255, 255)

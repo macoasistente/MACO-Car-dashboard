@@ -9,17 +9,22 @@ import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Base64
 import android.view.WindowManager
 import android.webkit.GeolocationPermissions
 import android.webkit.JavascriptInterface
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.ArrayAdapter
+import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -51,6 +56,27 @@ class MainActivity : AppCompatActivity() {
     private val askPerms = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { afterPermissions() }
     private val askBtOn = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { afterPermissions() }
     private var pendingPick = false
+
+    // <input type="file"> (car photo, restore a backup)
+    private var fileCb: ValueCallback<Array<Uri>>? = null
+    private val pickFile = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        fileCb?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(r.resultCode, r.data))
+        fileCb = null
+    }
+
+    // "Save a backup"
+    private var pendingSave: String? = null
+    private val createDoc = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        val t = pendingSave
+        pendingSave = null
+        if (uri == null || t == null) return@registerForActivityResult
+        try {
+            contentResolver.openOutputStream(uri)?.use { it.write(t.toByteArray()) }
+            Toast.makeText(this, "Backup saved", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Couldn't save the backup", Toast.LENGTH_LONG).show()
+        }
+    }
 
     @OptIn(FlowPreview::class)
     @SuppressLint("SetJavaScriptEnabled")
@@ -91,6 +117,18 @@ class MainActivity : AppCompatActivity() {
         web.webChromeClient = object : WebChromeClient() {
             override fun onGeolocationPermissionsShowPrompt(origin: String, callback: GeolocationPermissions.Callback) {
                 callback.invoke(origin, true, true)
+            }
+
+            override fun onShowFileChooser(view: WebView, cb: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean {
+                fileCb?.onReceiveValue(null)
+                fileCb = cb
+                return try {
+                    pickFile.launch(params.createIntent())
+                    true
+                } catch (e: Exception) {
+                    fileCb = null
+                    false
+                }
             }
         }
         web.addJavascriptInterface(Bridge(), "SophieNative")
@@ -194,6 +232,18 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface fun clearCodes() = ObdService.send(this@MainActivity, ObdService.ACTION_CLEAR_CODES)
 
         @JavascriptInterface fun setInfo(json: String) { Hub.parseInfo(json)?.let { Hub.info.value = it } }
+
+        @JavascriptInterface fun setPhoto(dataUrl: String) {
+            try {
+                val bytes = Base64.decode(dataUrl.substringAfter(","), Base64.DEFAULT)
+                Hub.photo.value = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            } catch (_: Exception) {}
+        }
+
+        @JavascriptInterface fun saveFile(name: String, text: String) = runOnUiThread {
+            pendingSave = text
+            createDoc.launch(name)
+        }
 
         @JavascriptInterface fun notify(title: String, body: String, tag: String) {
             if (Build.VERSION.SDK_INT >= 33 &&
