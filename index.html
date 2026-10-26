@@ -592,6 +592,11 @@ nav.tabs {
     </div>
     <div class="glass card-pad"><div style="font-weight:650">Share with Claude</div><p class="muted">Copies every reading, code, and the connection log as text. Paste it in your Claude chat.</p><button class="btn primary" id="reportBtn2" type="button">Copy report</button><textarea id="reportOut" hidden readonly style="min-height:160px;font-family:var(--font-mono);font-size:12px"></textarea></div>
     <div class="glass" style="overflow:hidden"><div style="padding:14px 18px 0;font-weight:650">Connection log</div><div class="log" id="log">Nothing yet.</div></div>
+    <div class="glass card-pad about">
+      <div style="font-weight:650">About</div>
+      <p class="muted" style="margin:6px 0 0">Car dashboard for OBD2 Bluetooth adapters. Your data stays on this phone.</p>
+      <p class="muted" style="margin:10px 0 0;font-size:13px">Made by <a href="https://macoasistente.com" target="_blank" rel="noopener" style="color:inherit;font-weight:600">MACO Asistente, LLC</a> · © <span id="aboutYear"></span></p>
+    </div>
   </section>
 </div>
 
@@ -1851,6 +1856,8 @@ async function copyReport() {
 }
 $('reportBtn').onclick = () => { showTab('setup'); copyReport(); };
 $('reportBtn2').onclick = copyReport;
+
+$('aboutYear').textContent = new Date().getFullYear();
 
 /* ---------- backup / restore ---------- */
 function backupData() {
