@@ -1,0 +1,217 @@
+package com.macoasistente.sophie
+
+import android.Manifest
+import android.annotation.SuppressLint
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
+import android.view.WindowManager
+import android.webkit.GeolocationPermissions
+import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.widget.ArrayAdapter
+import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
+import androidx.webkit.WebViewAssetLoader
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.sample
+import kotlinx.coroutines.launch
+import org.json.JSONObject
+
+/** Phone screen: the same dashboard as the website, with Bluetooth handled by [ObdService]. */
+@SuppressLint("MissingPermission")
+class MainActivity : AppCompatActivity() {
+
+    private lateinit var web: WebView
+    private var pageReady = false
+
+    private val perms: Array<String>
+        get() = buildList {
+            if (Build.VERSION.SDK_INT >= 31) { add(Manifest.permission.BLUETOOTH_SCAN); add(Manifest.permission.BLUETOOTH_CONNECT) }
+            add(Manifest.permission.ACCESS_FINE_LOCATION)
+            if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+        }.toTypedArray()
+
+    private val askPerms = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { afterPermissions() }
+    private val askBtOn = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { afterPermissions() }
+    private var pendingPick = false
+
+    @OptIn(FlowPreview::class)
+    @SuppressLint("SetJavaScriptEnabled")
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        ObdService.ensureChannels(this)
+        web = WebView(this)
+        setContentView(web)
+
+        val loader = WebViewAssetLoader.Builder()
+            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
+            .build()
+        web.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            setGeolocationEnabled(true)
+            mediaPlaybackRequiresUserGesture = true
+        }
+        web.overScrollMode = WebView.OVER_SCROLL_NEVER
+        web.setBackgroundColor(0xFF000000.toInt())
+        web.webViewClient = object : WebViewClient() {
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
+                loader.shouldInterceptRequest(request.url)
+
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                val u = request.url
+                if (u.host == "appassets.androidplatform.net") return false
+                // maps links etc. open in their own apps
+                try { startActivity(Intent(Intent.ACTION_VIEW, u)) } catch (_: Exception) {}
+                return true
+            }
+
+            override fun onPageFinished(view: WebView, url: String) {
+                pageReady = true
+                pushSnap(Hub.state.value)
+            }
+        }
+        web.webChromeClient = object : WebChromeClient() {
+            override fun onGeolocationPermissionsShowPrompt(origin: String, callback: GeolocationPermissions.Callback) {
+                callback.invoke(origin, true, true)
+            }
+        }
+        web.addJavascriptInterface(Bridge(), "SophieNative")
+        web.loadUrl("https://appassets.androidplatform.net/assets/web/index.html")
+
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() { moveTaskToBack(true) }
+        })
+
+        lifecycleScope.launch {
+            Hub.state.sample(300).collect { s ->
+                pushSnap(s)
+                if (s.mode == "live") window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+        }
+        lifecycleScope.launch { Hub.logs.collect { js("log", JSONObject().put("type", "log").put("text", it)) } }
+        lifecycleScope.launch { Hub.cluster.collect { js("cluster", JSONObject().put("type", "cluster").put("resp", it)) } }
+
+        if (hasPerms()) afterPermissions() else askPerms.launch(perms)
+    }
+
+    private fun pushSnap(s: Hub.Snap) {
+        if (!pageReady) return
+        web.evaluateJavascript("window.__sophieNative&&window.__sophieNative({type:'snap',snap:${Hub.snapJson(s)}})", null)
+    }
+
+    private fun js(@Suppress("UNUSED_PARAMETER") kind: String, o: JSONObject) {
+        if (!pageReady) return
+        web.evaluateJavascript("window.__sophieNative&&window.__sophieNative($o)", null)
+    }
+
+    private fun hasPerms() = perms.filter { it != Manifest.permission.POST_NOTIFICATIONS }
+        .all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }
+
+    private fun btAdapter(): BluetoothAdapter? = getSystemService(BluetoothManager::class.java)?.adapter
+
+    private fun afterPermissions() {
+        if (!hasPerms()) { Hub.log("Bluetooth permission is needed to talk to the car"); return }
+        val ad = btAdapter()
+        if (ad == null) { Hub.log("This phone has no Bluetooth"); return }
+        if (!ad.isEnabled) {
+            try { askBtOn.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)) } catch (_: Exception) {}
+            return
+        }
+        if (pendingPick) { pendingPick = false; pickAdapter(); return }
+        // keep the service running so it reconnects whenever the car starts
+        ObdService.send(this, ObdService.ACTION_START)
+    }
+
+    /** Lists nearby Bluetooth LE devices; OBD adapters first. Remembered after the first pick. */
+    private fun pickAdapter() {
+        val scanner = btAdapter()?.bluetoothLeScanner ?: run { Hub.log("Bluetooth is off"); return }
+        val found = linkedMapOf<String, String>()
+        val labels = ArrayAdapter<String>(this, android.R.layout.select_dialog_item)
+        val obdLike = Regex("vlink|obd|icar|elm|vgate|v-link", RegexOption.IGNORE_CASE)
+        val cb = object : ScanCallback() {
+            override fun onScanResult(callbackType: Int, result: ScanResult) {
+                val name = result.device.name ?: result.scanRecord?.deviceName ?: return
+                val addr = result.device.address
+                if (found.containsKey(addr)) return
+                found[addr] = name
+                runOnUiThread {
+                    labels.clear()
+                    found.entries.sortedByDescending { obdLike.containsMatchIn(it.value) }
+                        .forEach { labels.add(it.value + "  ·  " + it.key.takeLast(5)) }
+                }
+            }
+        }
+        scanner.startScan(null, ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(), cb)
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Choose your OBD2 adapter")
+            .setAdapter(labels) { _, which ->
+                val label = labels.getItem(which) ?: return@setAdapter
+                val addr = found.entries.firstOrNull { label.endsWith(it.key.takeLast(5)) && label.startsWith(it.value) }?.key
+                if (addr != null) ObdService.send(this, ObdService.ACTION_CONNECT, addr)
+            }
+            .setNegativeButton("Cancel") { _, _ -> Hub.update { it.copy(mode = "idle") } }
+            .setOnDismissListener { try { scanner.stopScan(cb) } catch (_: Exception) {} }
+            .create()
+        dialog.show()
+    }
+
+    private inner class Bridge {
+        @JavascriptInterface fun isNative() = true
+
+        @JavascriptInterface fun connect() = runOnUiThread {
+            val saved = ObdService.savedAddress(this@MainActivity)
+            if (!hasPerms()) { pendingPick = saved == null; askPerms.launch(perms); return@runOnUiThread }
+            if (saved != null) ObdService.send(this@MainActivity, ObdService.ACTION_CONNECT, saved) else pickAdapter()
+        }
+
+        /** Forget the saved adapter and show the list again. */
+        @JavascriptInterface fun chooseAdapter() = runOnUiThread {
+            getSharedPreferences("sophie", MODE_PRIVATE).edit().remove("address").apply()
+            if (hasPerms()) pickAdapter() else { pendingPick = true; askPerms.launch(perms) }
+        }
+
+        @JavascriptInterface fun disconnect() = ObdService.send(this@MainActivity, ObdService.ACTION_DISCONNECT)
+        @JavascriptInterface fun scanCodes() = ObdService.send(this@MainActivity, ObdService.ACTION_SCAN_CODES)
+        @JavascriptInterface fun clearCodes() = ObdService.send(this@MainActivity, ObdService.ACTION_CLEAR_CODES)
+
+        @JavascriptInterface fun setInfo(json: String) { Hub.parseInfo(json)?.let { Hub.info.value = it } }
+
+        @JavascriptInterface fun notify(title: String, body: String, tag: String) {
+            if (Build.VERSION.SDK_INT >= 33 &&
+                ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) return
+            val n = NotificationCompat.Builder(this@MainActivity, ObdService.ALERT_CHANNEL)
+                .setSmallIcon(android.R.drawable.stat_notify_error)
+                .setContentTitle(title)
+                .setContentText(body)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+                .setAutoCancel(true)
+                .build()
+            NotificationManagerCompat.from(this@MainActivity).notify(tag.hashCode(), n)
+        }
+
+        @JavascriptInterface fun notifyAllowed(): Boolean = Build.VERSION.SDK_INT < 33 ||
+            ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
+        @JavascriptInterface fun requestNotify() = runOnUiThread { askPerms.launch(perms) }
+    }
+}

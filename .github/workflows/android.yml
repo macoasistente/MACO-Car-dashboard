@@ -1,0 +1,40 @@
+name: Android app
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "android/**"
+      - "index.html"
+      - "icons/**"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+      - name: Build
+        working-directory: android
+        run: gradle --no-daemon assembleDebug
+      - name: Publish install file
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk Sophie.apk
+          gh release delete android-latest --yes --cleanup-tag || true
+          gh release create android-latest Sophie.apk \
+            --title "Sophie for Android (build ${{ github.run_number }})" \
+            --notes "Install Sophie.apk on the Android phone. Built from ${{ github.sha }}." \
+            --prerelease

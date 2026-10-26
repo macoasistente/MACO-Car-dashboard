@@ -881,6 +881,11 @@ async function readKiaOdo() {
     await elm.send('ATSH7C6');
     const r = await elm.send('22B002', 4000);
     await elm.send('ATSH7DF');
+    parseClusterOdo(r);
+  } catch (e) { log('Cluster odometer not available'); await elm.send('ATSH7DF').catch(() => {}); }
+}
+function parseClusterOdo(r) {
+  try {
     log('Cluster 22B002: ' + r.replace(/\n/g, ' ').slice(0, 120));
     const h = joinFrames(r), i = h.indexOf('62B002');
     if (i < 0) return;
@@ -893,7 +898,7 @@ async function readKiaOdo() {
     }
     if (best != null) { setOdo(best, 'car'); log('Odometer from cluster: ' + Math.round(best) + ' mi'); }
     else log('Cluster answered, but no value matched your mileage yet');
-  } catch (e) { log('Cluster odometer not available'); await elm.send('ATSH7DF').catch(() => {}); }
+  } catch (e) { log('Cluster answer unreadable'); }
 }
 
 async function initAdapter() {
@@ -978,7 +983,7 @@ function tickTrip() {
   const dt = (now - st.trip.last) / 3600000; st.trip.last = now;
   const spd = st.vals.speed || 0;
   st.trip.dist += spd * dt;
-  if (st.mode === 'live' && st.vals.odometer == null) addOdo(spd * dt * 0.621371);
+  if (st.mode === 'live' && st.vals.odometer == null && !NATIVE) addOdo(spd * dt * 0.621371);
   st.trip.max = Math.max(st.trip.max, spd);
   // fuel from fuel-rate PID, else MAF (stoich 14.7, gasoline ~740 g/L)
   const lph = fuelLph();
@@ -1031,10 +1036,46 @@ function startDemo() {
 }
 function stopDemo() { clearInterval(demoT); demoT = null; }
 
+/* ---------- native Android app: Bluetooth runs in a background service ---------- */
+const NATIVE = !!window.SophieNative;
+let nativeDist = null, nativeCodes = '';
+window.__sophieNative = (msg) => {
+  if (msg.type === 'log') { log(msg.text); return; }
+  if (msg.type === 'cluster') { parseClusterOdo(msg.resp); return; }
+  if (msg.type !== 'snap') return;
+  const s = msg.snap, was = st.mode;
+  if (st.mode === 'demo') { if (s.mode === 'idle') return; stopDemo(); store.set('demo', false); resetAll(); }
+  st.mode = s.mode;
+  if (s.protocol) st.protocol = s.protocol;
+  if (s.vin) st.vin = s.vin;
+  if (s.adapter) st.adapter = { name: s.adapter, volt: s.volt };
+  if (s.supported) st.supported = new Set(s.supported);
+  st.codes = s.codes;
+  if (s.mode === 'live') {
+    if (was !== 'live') { fuelSeen = null; st.vals = {}; st.hist = {}; st.trip = { dist: 0, fuelL: 0, max: 0, start: 0, last: 0 }; nativeDist = null; store.set('demo', false); }
+    for (const k in s.vals) setVal(k, s.vals[k]);
+    if (nativeDist != null && s.distKm > nativeDist && st.vals.odometer == null) addOdo((s.distKm - nativeDist) * 0.621371);
+    nativeDist = s.distKm;
+    tickTrip();
+  } else if (was === 'live') { fuelSeen = null; if (S.autoPark) saveParking(true); }
+  const sb = $('scanBtn'); sb.disabled = !!s.scanning; sb.textContent = s.scanning ? 'Scanning…' : st.codes.scanned ? 'Scan again' : 'Scan for codes';
+  const cj = JSON.stringify(st.codes); if (cj !== nativeCodes) { nativeCodes = cj; renderCodes(); }
+  render();
+};
+let nativeInfo = '';
+function pushNativeInfo(alerts) {
+  if (!NATIVE) return;
+  const o = getOdo();
+  const codes = [...st.codes.stored, ...st.codes.pending].map((c) => { const d = describeDTC(c); return { c, title: d.title, drive: d.drive, sev: d.sev }; });
+  const j = JSON.stringify({ name: car().name, units: S.units, odoMi: o ? Math.round(o.mi) : null, alerts: alerts.map((x) => ({ t: x.t, cls: x.cls })), codes });
+  if (j !== nativeInfo) { nativeInfo = j; try { SophieNative.setInfo(j); } catch {} }
+}
+
 /* ---------- connect / disconnect ---------- */
 async function connect(known) {
-  if (st.mode === 'live' || st.mode === 'connecting') { sheet(`<h3>Disconnect?</h3><p class="muted">Live data will stop.</p><div class="btn-row"><button class="btn" data-close type="button">Stay connected</button><button class="btn danger" id="dcYes" type="button">Disconnect</button></div>`); $('dcYes').onclick = () => { closeSheet(); stopLive(true); }; return; }
+  if (st.mode === 'live' || st.mode === 'connecting') { sheet(`<h3>Disconnect?</h3><p class="muted">Live data will stop.</p><div class="btn-row"><button class="btn" data-close type="button">Stay connected</button><button class="btn danger" id="dcYes" type="button">Disconnect</button></div>`); $('dcYes').onclick = () => { closeSheet(); if (NATIVE) SophieNative.disconnect(); else stopLive(true); }; return; }
   if (st.mode === 'demo') { stopDemo(); st.mode = 'idle'; store.set('demo', false); resetAll(); }
+  if (NATIVE) { SophieNative.connect(); return; }
   st.mode = 'connecting'; render();
   try {
     await elm.connect(known && known.gatt ? known : undefined);
@@ -1080,6 +1121,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 async function scanCodes(quiet) {
   if (st.mode === 'demo') { toast('Sample codes shown'); return; }
   if (st.mode !== 'live') { if (!quiet) toast('Connect to the car first'); return; }
+  if (NATIVE) { SophieNative.scanCodes(); return; }
   $('scanBtn').disabled = true; $('scanBtn').textContent = 'Scanning…';
   try {
     await readMil();
@@ -1097,6 +1139,7 @@ async function clearCodes() {
   $('clearConfirm').hidden = true;
   if (st.mode === 'demo') { st.codes = { stored: [], pending: [], permanent: [], mil: { on: false, count: 0 }, scanned: true }; renderCodes(); render(); toast('Sample codes cleared'); return; }
   if (st.mode !== 'live') { toast('Connect to the car first'); return; }
+  if (NATIVE) { SophieNative.clearCodes(); toast('Clearing codes…'); return; }
   try { await elm.send('04', 6000); toast('Codes cleared'); log('Codes cleared'); } catch (e) { toast('Clear failed'); }
   await scanCodes(true);
 }
@@ -1715,19 +1758,22 @@ function renderAlerts() {
   const shown = a.filter((x) => x.k !== 'mil' && x.k !== 'pend');
   $('alerts').innerHTML = shown.slice(0, 3).map((x, i) => `<button type="button" class="alert ${x.cls}" data-i="${i}"><span class="dot ${x.cls}"></span><span><b>${esc(x.t)}</b><span class="t">${esc(x.d)}</span></span></button>`).join('');
   $('alerts').querySelectorAll('.alert').forEach((b) => b.onclick = () => showTab(shown[+b.dataset.i].go));
+  pushNativeInfo(shown);
   for (const x of a) if (!notified.has(x.k)) { notified.add(x.k); pushNotify(x); }
 }
 function pushNotify(x) {
   if (!store.get('notify', false) || st.mode === 'demo') return;
+  if (NATIVE) { try { SophieNative.notify(`${car().name}: ${x.t}`, x.d, x.k); } catch {} return; }
   try { if (Notification.permission === 'granted') new Notification(`${car().name}: ${x.t}`, { body: x.d, tag: x.k }); } catch {}
 }
 function syncNotif() {
-  const ok = 'Notification' in window;
-  const on = ok && store.get('notify', false) && Notification.permission === 'granted';
+  const ok = NATIVE || 'Notification' in window;
+  const on = ok && store.get('notify', false) && (NATIVE ? SophieNative.notifyAllowed() : Notification.permission === 'granted');
   $('notifBtn').textContent = on ? 'On' : 'Turn on';
   if (!ok) $('notifState').textContent = 'Not available in this browser. The native app will have full notifications.';
 }
 $('notifBtn').onclick = async () => {
+  if (NATIVE) { const on = !(store.get('notify', false) && SophieNative.notifyAllowed()); store.set('notify', on); if (on && !SophieNative.notifyAllowed()) SophieNative.requestNotify(); toast(on ? 'Notifications on' : 'Notifications off'); syncNotif(); return; }
   if (!('Notification' in window)) { toast('Notifications aren\'t available here'); return; }
   try {
     const p = await Notification.requestPermission();
@@ -1772,7 +1818,7 @@ $('connBtn').onclick = () => connect();
 async function autoReconnect() {
   try {
     const name = store.get('adName', null);
-    if (!name || !navigator.bluetooth?.getDevices) return;
+    if (NATIVE || !name || !navigator.bluetooth?.getDevices) return;
     const ds = await navigator.bluetooth.getDevices();
     const d = ds.find((x) => x.name === name);
     if (!d) return;
@@ -1825,5 +1871,5 @@ setTimeout(() => document.querySelectorAll('#demoSeg button').forEach((b) => b.s
 })();
 </script>
 
-<script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});</script>
+<script>if (!window.SophieNative && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});</script>
 </body></html>
