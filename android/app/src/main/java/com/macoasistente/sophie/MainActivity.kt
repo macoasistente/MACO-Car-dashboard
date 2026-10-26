@@ -7,12 +7,18 @@ import android.bluetooth.BluetoothManager
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
+import android.app.DownloadManager
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
 import android.util.Base64
 import android.view.WindowManager
 import android.webkit.GeolocationPermissions
@@ -40,6 +46,7 @@ import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -153,7 +160,66 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch { Hub.cluster.collect { js("cluster", JSONObject().put("type", "cluster").put("resp", it)) } }
 
         if (hasPerms()) afterPermissions() else askPerms.launch(perms)
+        ContextCompat.registerReceiver(this, downloadDone, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE), ContextCompat.RECEIVER_EXPORTED)
         checkForUpdate()
+    }
+
+    private val apkUrl = "https://github.com/macoasistente/MACO-Car-dashboard/releases/download/android-latest/Sophie.apk"
+    private var updateId = -1L
+    private var wantUpdate = false
+
+    override fun onResume() {
+        super.onResume()
+        // back from the "install unknown apps" setting
+        if (wantUpdate && packageManager.canRequestPackageInstalls()) { wantUpdate = false; downloadUpdate() }
+    }
+
+    /** Downloads the new version inside the app, then hands it to Android's installer. */
+    private fun downloadUpdate() {
+        if (Build.VERSION.SDK_INT >= 26 && !packageManager.canRequestPackageInstalls()) {
+            Toast.makeText(this, "Allow Sophie to install updates, then come back", Toast.LENGTH_LONG).show()
+            wantUpdate = true
+            try {
+                startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+            } catch (_: Exception) {}
+            return
+        }
+        try {
+            getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)?.let { File(it, "Sophie-update.apk").delete() }
+            val dm = getSystemService(DownloadManager::class.java)
+            val req = DownloadManager.Request(Uri.parse(apkUrl))
+                .setTitle("Sophie update")
+                .setMimeType("application/vnd.android.package-archive")
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
+                .setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, "Sophie-update.apk")
+            updateId = dm.enqueue(req)
+            Toast.makeText(this, "Downloading the update…", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Couldn't start the download", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private val downloadDone = object : BroadcastReceiver() {
+        override fun onReceive(ctx: Context, intent: Intent) {
+            val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
+            if (id != updateId) return
+            val dm = getSystemService(DownloadManager::class.java)
+            val uri = dm.getUriForDownloadedFile(id)
+            if (uri == null) { Toast.makeText(ctx, "The update didn't download. Try again later.", Toast.LENGTH_LONG).show(); return }
+            try {
+                startActivity(
+                    Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            } catch (_: Exception) {
+                Toast.makeText(ctx, "Open the Sophie update from your notifications to install it", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        try { unregisterReceiver(downloadDone) } catch (_: Exception) {}
+        super.onDestroy()
     }
 
     /** Asks GitHub whether a newer build of the app exists and offers to download it. */
@@ -170,12 +236,8 @@ class MainActivity : AppCompatActivity() {
             withContext(Dispatchers.Main) {
                 AlertDialog.Builder(this@MainActivity)
                     .setTitle("Update available")
-                    .setMessage("A newer version of the app is ready. Download it, then open the file to install. Your data stays.")
-                    .setPositiveButton("Download") { _, _ ->
-                        try {
-                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/macoasistente/MACO-Car-dashboard/releases/download/android-latest/Sophie.apk")))
-                        } catch (_: Exception) {}
-                    }
+                    .setMessage("A newer version of the app is ready. Tap Update, then Install. Your data stays.")
+                    .setPositiveButton("Update") { _, _ -> downloadUpdate() }
                     .setNegativeButton("Later") { _, _ -> prefs.edit().putInt("skipBuild", build).apply() }
                     .show()
             }
