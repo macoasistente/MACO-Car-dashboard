@@ -19,6 +19,9 @@ import com.macoasistente.sophie.Hub
 import com.macoasistente.sophie.Obd
 import com.macoasistente.sophie.R
 import java.text.NumberFormat
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.min
 
@@ -102,151 +105,157 @@ class DashboardRenderer(ctx: CarContext) : SurfaceCallback {
         c.drawCircle(x, y, r, fill)
     }
 
+    private var liveSince = 0L
+
+    private fun statusColor(id: String, x: Double): Int = when (id) {
+        "coolant" -> if (x > 112) CRIT else if (x > 105) WARN else OK
+        "volt" -> if (x < 11.8 || x > 15.2) CRIT else if (x < 12.4 || x > 14.9) WARN else OK
+        "fuel" -> if (x < 7) CRIT else if (x < 15) WARN else OK
+        "ltft" -> if (abs(x) > 20) CRIT else if (abs(x) > 10) WARN else OK
+        else -> OK
+    }
+
     private fun paint(c: Canvas) {
         val area = visible?.takeIf { it.width() > 100 && it.height() > 100 } ?: Rect(0, 0, width, height)
-        // background
-        fill.shader = LinearGradient(0f, 0f, 0f, height.toFloat(), Color.rgb(14, 17, 24), Color.BLACK, Shader.TileMode.CLAMP)
-        c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), fill)
-        fill.shader = RadialGradient(width * 0.15f, height * 0.05f, width * 0.6f, Color.argb(60, 10, 132, 255), Color.TRANSPARENT, Shader.TileMode.CLAMP)
-        c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), fill)
+        val W = width.toFloat()
+        val H = height.toFloat()
+        fill.shader = LinearGradient(0f, 0f, 0f, H, Color.rgb(14, 17, 24), Color.BLACK, Shader.TileMode.CLAMP)
+        c.drawRect(0f, 0f, W, H, fill)
         fill.shader = null
 
-        val k = min(area.width() / 900f, area.height() / 500f)
-        val pad = 14 * k
-        val left = area.left + pad
-        val top = area.top + pad
-        val right = area.right - pad
-        val bottom = area.bottom - pad
+        val aw = area.width().toFloat()
+        val ah = area.height().toFloat()
+        val k = min(aw / 1000f, ah / 520f)
+        val pad = 18 * k
+        val L = area.left + pad
+        val T = area.top + pad
+        val R = area.right - pad
+        val B = area.bottom - pad
         val v = snap.vals
         val live = snap.mode == "live"
+        if (live && liveSince == 0L) liveSince = System.currentTimeMillis()
+        if (!live) liveSince = 0L
 
-        // ---- header: photo, name, status, odometer
-        val hh = 64 * k
-        photo?.let {
-            val ph = hh
-            val pw = ph * it.width / it.height
-            c.drawBitmap(it, null, RectF(left, top, left + pw, top + ph), bmp)
-        }
-        val nameX = left + (photo?.let { hh * it.width / it.height } ?: 0f) + 14 * k
-        label(c, info.name, nameX, top + 30 * k, 30 * k, Color.WHITE, bold = true)
+        // ---- header: name + status, clock
+        val name = info.name.uppercase()
+        label(c, name, L, T + 26 * k, 26 * k, Color.WHITE, bold = true)
+        val nw = text.measureText(name)
         val (stColor, stText) = when {
             live -> OK to "Live"
             snap.mode == "connecting" -> WARN to "Connecting…"
             snap.waiting -> MUTED to "Waiting for ${info.name} to start"
             else -> MUTED to "Not connected"
         }
-        dot(c, nameX + 6 * k, top + 52 * k, 5 * k, stColor)
-        label(c, stText, nameX + 20 * k, top + 58 * k, 18 * k)
-        info.odoMi?.let {
-            val (o, u) = if (us) it to "mi" else it / 0.621371 to "km"
-            label(c, "${n0(o)} $u", right, top + 30 * k, 24 * k, Color.WHITE, bold = true, align = Paint.Align.RIGHT)
-            label(c, "ODOMETER", right, top + 54 * k, 14 * k, align = Paint.Align.RIGHT)
+        dot(c, L + nw + 18 * k, T + 17 * k, 5 * k, stColor)
+        label(c, stText, L + nw + 30 * k, T + 24 * k, 17 * k)
+        val now = Date()
+        label(c, SimpleDateFormat("h:mm", Locale.getDefault()).format(now), R, T + 30 * k, 34 * k, Color.WHITE, bold = true, align = Paint.Align.RIGHT)
+        label(c, SimpleDateFormat("EEEE, MMM d", Locale.getDefault()).format(now), R, T + 52 * k, 14 * k, align = Paint.Align.RIGHT)
+
+        // ---- Sophie in the middle, with a soft glow and a floor line
+        val cx = (L + R) / 2
+        var carW = 0f
+        var carH = ah * 0.56f
+        var carX = cx
+        val carY = area.top + ah * 0.19f
+        photo?.let { ph ->
+            carH = min(ah * 0.56f, (R - L) * 0.40f * ph.height / ph.width)
+            carW = carH * ph.width / ph.height
+            carX = cx - carW / 2
+            fill.shader = RadialGradient(cx, carY + carH * 0.55f, carW * 0.75f, Color.argb(56, 10, 132, 255), Color.TRANSPARENT, Shader.TileMode.CLAMP)
+            c.drawRect(0f, 0f, W, H, fill)
+            fill.shader = LinearGradient(L, 0f, R, 0f, intArrayOf(Color.TRANSPARENT, Color.argb(46, 255, 255, 255), Color.TRANSPARENT), null, Shader.TileMode.CLAMP)
+            c.drawRect(L, carY + carH * 0.90f, R, carY + carH * 0.90f + 1.2f * k, fill)
+            fill.shader = null
+            c.drawBitmap(ph, null, RectF(carX, carY, carX + carW, carY + carH), bmp)
         }
 
-        // ---- alert bar at the bottom
-        val alert = topAlert()
-        var contentBottom = bottom
-        if (alert != null) {
-            val ah = 52 * k
-            val r = RectF(left, bottom - ah, right, bottom)
-            glass(c, r, k, alert.second)
-            dot(c, r.left + 24 * k, r.centerY(), 6 * k, alert.second)
-            label(c, ellipsize(alert.first, r.width() - 60 * k, 20 * k), r.left + 44 * k, r.centerY() + 7 * k, 20 * k, Color.WHITE, bold = true)
-            contentBottom = r.top - pad
+        // ---- callouts pointing at the car
+        fun callout(fx: Float, fy: Float, lx: Float, ly: Float, leftAligned: Boolean, lab: String, value: String, unit: String, color: Int?) {
+            if (carW > 0) {
+                val px = carX + fx * carW
+                val py = carY + fy * carH
+                stroke.color = Color.argb(90, 255, 255, 255)
+                stroke.strokeWidth = 1 * k
+                c.drawLine(px, py, if (leftAligned) lx - 8 * k else lx + 8 * k, ly - 8 * k, stroke)
+                dot(c, px, py, 3.5f * k, color ?: Color.WHITE)
+            }
+            if (leftAligned) {
+                label(c, lab, lx, ly - 14 * k, 13 * k)
+                label(c, value, lx, ly + 20 * k, 30 * k, Color.WHITE, bold = true)
+                val w = text.measureText(value)
+                label(c, unit, lx + w + 5 * k, ly + 20 * k, 15 * k)
+            } else {
+                label(c, lab, lx, ly - 14 * k, 13 * k, align = Paint.Align.RIGHT)
+                label(c, unit, lx, ly + 20 * k, 15 * k, align = Paint.Align.RIGHT)
+                val w = text.measureText(unit)
+                label(c, value, lx - w - 5 * k, ly + 20 * k, 30 * k, Color.WHITE, bold = true, align = Paint.Align.RIGHT)
+            }
         }
+        fun has(id: String) = live && v[id] != null
+        val lx0 = carX - 28 * k
+        val lx1 = carX + carW + 28 * k
+        val (tc, tu) = temp(v["coolant"] ?: 0.0)
+        callout(0.40f, 0.30f, lx0, carY + carH * 0.12f, false, "ENGINE TEMP", if (has("coolant")) n0(tc) else "–", tu, v["coolant"]?.takeIf { live }?.let { statusColor("coolant", it) })
+        val trim = v["ltft"]
+        callout(0.56f, 0.36f, lx1, carY + carH * 0.12f, true, "FUEL TRIM", if (has("ltft") && trim != null) (if (trim > 0) "+" else "") + n1(trim) else "–", "%", trim?.takeIf { live }?.let { statusColor("ltft", it) })
+        callout(0.08f, 0.40f, lx0, carY + carH * 0.62f, false, "BATTERY", if (has("volt")) n1(v["volt"]) else "–", "V", v["volt"]?.takeIf { live }?.let { statusColor("volt", it) })
+        callout(0.90f, 0.42f, lx1, carY + carH * 0.62f, true, "FUEL", if (has("fuel")) n0(v["fuel"]) else "–", "%", v["fuel"]?.takeIf { live }?.let { statusColor("fuel", it) })
 
-        // ---- left: speed + rpm + mpg
-        val bodyTop = top + hh + pad
-        val split = left + (right - left) * 0.40f
-        val big = RectF(left, bodyTop, split - pad / 2, contentBottom)
-        glass(c, big, k)
+        // ---- left: speed and rpm
+        val colW = (R - L) * 0.15f
+        val sy = carY + carH * 0.24f
         val (spd, spdU) = speed(v["speed"] ?: 0.0)
-        label(c, "SPEED", big.left + 22 * k, big.top + 34 * k, 15 * k)
-        label(c, if (live) n0(spd) else "–", big.left + 18 * k, big.top + 34 * k + 92 * k, 104 * k, Color.WHITE, bold = true)
-        label(c, spdU, big.left + 22 * k, big.top + 34 * k + 122 * k, 20 * k)
-
-        // rpm bar
+        label(c, "SPEED", L, sy, 14 * k)
+        label(c, if (live) n0(spd) else "–", L - 4 * k, sy + 84 * k, 92 * k, Color.WHITE, bold = true)
+        label(c, spdU, L, sy + 110 * k, 17 * k)
+        val by = sy + 140 * k
         val rpm = v["rpm"]
-        val barY = big.bottom - 92 * k
-        val barL = big.left + 22 * k
-        val barR = big.right - 22 * k
-        label(c, "RPM", barL, barY - 14 * k, 15 * k)
-        label(c, if (live) n0(rpm) else "–", barR, barY - 14 * k, 20 * k, Color.WHITE, bold = true, align = Paint.Align.RIGHT)
+        label(c, "RPM", L, by - 10 * k, 13 * k)
+        label(c, if (live) n0(rpm) else "–", L + colW, by - 10 * k, 16 * k, Color.WHITE, bold = true, align = Paint.Align.RIGHT)
         fill.color = Color.argb(30, 255, 255, 255)
-        c.drawRoundRect(RectF(barL, barY, barR, barY + 10 * k), 5 * k, 5 * k, fill)
+        c.drawRoundRect(RectF(L, by, L + colW, by + 7 * k), 3.5f * k, 3.5f * k, fill)
         if (live && rpm != null) {
             val f = (rpm / 6500.0).coerceIn(0.0, 1.0).toFloat()
-            fill.shader = LinearGradient(barL, 0f, barR, 0f, intArrayOf(ACCENT, ACCENT, WARN, CRIT), floatArrayOf(0f, 0.6f, 0.8f, 1f), Shader.TileMode.CLAMP)
-            c.drawRoundRect(RectF(barL, barY, barL + (barR - barL) * f, barY + 10 * k), 5 * k, 5 * k, fill)
+            fill.shader = LinearGradient(L, 0f, L + colW, 0f, intArrayOf(ACCENT, ACCENT, WARN, CRIT), floatArrayOf(0f, 0.6f, 0.8f, 1f), Shader.TileMode.CLAMP)
+            c.drawRoundRect(RectF(L, by, L + colW * f, by + 7 * k), 3.5f * k, 3.5f * k, fill)
             fill.shader = null
         }
+
+        // ---- right: this drive
+        val mins = if (liveSince > 0) (System.currentTimeMillis() - liveSince) / 60000 else -1
+        val trip = if (mins >= 0) "%d:%02d".format(mins / 60, mins % 60) else "–"
+        val (dist, du) = if (us) snap.distKm * 0.621371 to "mi" else snap.distKm to "km"
+        label(c, "THIS DRIVE", R, sy, 14 * k, align = Paint.Align.RIGHT)
+        label(c, trip, R, sy + 48 * k, 44 * k, Color.WHITE, bold = true, align = Paint.Align.RIGHT)
+        label(c, if (live) "${n1(dist)} $du" else "", R, sy + 72 * k, 17 * k, align = Paint.Align.RIGHT)
         val mpg = if (live) Obd.instantMpg(v) else null
         val mpgTxt = when {
             mpg == null -> "–"
             us -> n1(mpg) + " mpg"
             else -> n1(235.215 / mpg) + " L/100km"
         }
-        label(c, "RIGHT NOW", barL, big.bottom - 44 * k, 15 * k)
-        label(c, mpgTxt, barL, big.bottom - 18 * k, 24 * k, Color.WHITE, bold = true)
+        label(c, "RIGHT NOW", R, sy + 112 * k, 13 * k, align = Paint.Align.RIGHT)
+        label(c, mpgTxt, R, sy + 140 * k, 24 * k, Color.WHITE, bold = true, align = Paint.Align.RIGHT)
 
-        // ---- right: 2 x 3 tiles
-        val gx = split + pad / 2
-        val cols = 2
-        val rows = 3
-        val tw = (right - gx - pad * (cols - 1)) / cols
-        val th = (contentBottom - bodyTop - pad * (rows - 1)) / rows
-        val tiles = tiles()
-        for ((i, t) in tiles.withIndex()) {
-            val col = i % cols
-            val row = i / cols
-            val r = RectF(gx + col * (tw + pad), bodyTop + row * (th + pad), gx + col * (tw + pad) + tw, bodyTop + row * (th + pad) + th)
-            glass(c, r, k)
-            val ts = min(1f, th / (100 * k))
-            label(c, t.label, r.left + 18 * k, r.top + 28 * k * ts, 15 * k)
-            if (t.color != null) dot(c, r.right - 22 * k, r.top + 23 * k * ts, 5 * k, t.color)
-            label(c, t.value, r.left + 18 * k, r.top + 28 * k * ts + 40 * k * ts, 36 * k * ts, Color.WHITE, bold = true)
-            text.textSize = 36 * k * ts
+        // ---- secondary line and alert pill at the bottom
+        val extras = buildList {
+            v["iat"]?.takeIf { live }?.let { val (t, u) = temp(it); add("Intake ${n0(t)}$u") }
+            v["load"]?.takeIf { live }?.let { add("Load ${n0(it)}%") }
+            info.odoMi?.let { add(if (us) "${n0(it)} mi" else "${n0(it / 0.621371)} km") }
+        }.joinToString("   ·   ")
+        val alert = topAlert()
+        val pillTop = B - 44 * k
+        if (extras.isNotEmpty()) label(c, extras, cx, if (alert != null) pillTop - 16 * k else B - 8 * k, 15 * k, align = Paint.Align.CENTER)
+        if (alert != null) {
+            val msg = ellipsize(alert.first, (R - L) * 0.8f, 18 * k)
             text.typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            val w = text.measureText(t.value)
-            label(c, t.unit, r.left + 18 * k + w + 6 * k, r.top + 28 * k * ts + 40 * k * ts, 18 * k * ts)
-            t.note?.let { label(c, ellipsize(it, r.width() - 36 * k, 14 * k * ts), r.left + 18 * k, r.bottom - 12 * k * ts, 14 * k * ts) }
+            val w = text.measureText(msg) + 64 * k
+            val r = RectF(cx - w / 2, pillTop, cx + w / 2, B)
+            glass(c, r, k, alert.second)
+            dot(c, r.left + 24 * k, r.centerY(), 5 * k, alert.second)
+            label(c, msg, r.left + 42 * k, r.centerY() + 6 * k, 18 * k, Color.WHITE, bold = true)
         }
-    }
-
-    private class Tile(val label: String, val value: String, val unit: String, val color: Int?, val note: String? = null)
-
-    private fun tiles(): List<Tile> {
-        val v = snap.vals
-        val live = snap.mode == "live"
-        fun has(id: String) = live && v[id] != null
-        val list = mutableListOf<Tile>()
-        v["coolant"].let { x ->
-            val (t, u) = temp(x ?: 0.0)
-            list += Tile("ENGINE TEMP", if (has("coolant")) n0(t) else "–", u,
-                x?.takeIf { live }?.let { if (it > 112) CRIT else if (it > 105) WARN else OK },
-                x?.takeIf { live }?.let { if (it < 70) "Warming up" else if (it > 105) "Running hot" else "Normal" })
-        }
-        v["volt"].let { x ->
-            list += Tile("BATTERY", if (has("volt")) n1(x) else "–", "V",
-                x?.takeIf { live }?.let { if (it < 11.8 || it > 15.2) CRIT else if (it < 12.4 || it > 14.9) WARN else OK },
-                x?.takeIf { live }?.let { if (it >= 13.4) "Charging" else if (it >= 12.4) "OK, engine off" else "Low" })
-        }
-        v["fuel"].let { x ->
-            list += Tile("FUEL", if (has("fuel")) n0(x) else "–", "%",
-                x?.takeIf { live }?.let { if (it < 7) CRIT else if (it < 15) WARN else OK },
-                x?.takeIf { live }?.let { if (it < 15) "Fill up soon" else if (us) "About ${n1(it * 14.2 / 100)} gal left" else "About ${n0(it * 54 / 100)} L left" })
-        }
-        v["ltft"].let { x ->
-            list += Tile("FUEL TRIM", if (has("ltft")) (if (x!! > 0) "+" else "") + n1(x) else "–", "%",
-                x?.takeIf { live }?.let { if (abs(it) > 20) CRIT else if (abs(it) > 10) WARN else OK },
-                x?.takeIf { live }?.let { if (it > 10) "Adding fuel (air leak?)" else if (it < -10) "Running rich" else "Normal" })
-        }
-        v["iat"].let { x ->
-            val (t, u) = temp(x ?: 0.0)
-            list += Tile("INTAKE AIR", if (has("iat")) n0(t) else "–", u, null)
-        }
-        v["load"].let { x -> list += Tile("ENGINE LOAD", if (has("load")) n0(x) else "–", "%", null) }
-        return list
     }
 
     private fun topAlert(): Pair<String, Int>? {

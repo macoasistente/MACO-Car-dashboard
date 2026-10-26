@@ -14,6 +14,7 @@ import androidx.lifecycle.lifecycleScope
 import com.macoasistente.sophie.Hub
 import com.macoasistente.sophie.ObdService
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
@@ -39,6 +40,13 @@ class DashboardScreen(ctx: CarContext) : Screen(ctx) {
                 renderer.update(s, i)
                 // the action strip shows Connect only when there's no link
                 if (s.mode != lastMode) { lastMode = s.mode; invalidate() }
+            }
+        }
+        // keep the clock current when no data is arriving
+        lifecycleScope.launch {
+            while (true) {
+                delay(20000)
+                renderer.update(Hub.state.value, Hub.info.value)
             }
         }
     }
