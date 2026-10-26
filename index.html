@@ -33,7 +33,7 @@
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 [hidden] { display: none !important; }
-html, body { min-height: 100%; }
+html, body { min-height: 100%; overscroll-behavior-y: none; } /* no accidental pull-to-refresh, which would drop Bluetooth */
 body {
   margin: 0; background: var(--bg); color: var(--fg);
   font-family: var(--font); font-size: 15px; line-height: 1.4;
