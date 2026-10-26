@@ -581,6 +581,7 @@ nav.tabs {
         <li>Start the engine (or turn the key to ON).</li>
         <li><b>Android:</b> open this app in Chrome. <b>iPhone:</b> open it in the free Bluefy browser.</li>
         <li>Tap Connect and pick the adapter. The Vgate iCar Pro usually shows up as <b>IOS-Vlink</b> or <b>Android-Vlink</b>. Don't pair it in phone settings first.</li>
+        <li><b>Skip the list every time (Android):</b> in Chrome open <code>chrome://flags</code>, search <b>Web Bluetooth new permissions backend</b>, set it to Enabled and restart Chrome. After one more Connect, the app reconnects to Sophie by itself when it opens.</li>
       </ol>
     </div>
     <div class="glass card-pad"><div style="font-weight:650">Share with Claude</div><p class="muted">Copies every reading, code, and the connection log as text. Paste it in your Claude chat.</p><button class="btn primary" id="reportBtn2" type="button">Copy report</button><textarea id="reportOut" hidden readonly style="min-height:160px;font-family:var(--font-mono);font-size:12px"></textarea></div>
@@ -650,7 +651,7 @@ const M = [
   // air & temps
   { pid: '0F', id: 'iat', cat: 'air', name: 'Intake air temperature', u: 'temp', d: 0, f: (a) => a - 40, more: 'Temperature of the air going into the engine. Usually a little above outside temperature.' },
   { pid: '46', id: 'ambient', cat: 'air', name: 'Outside temperature', u: 'temp', d: 0, f: (a) => a - 40, more: 'Outside air temperature, if the car reports it.' },
-  { pid: '0B', id: 'map', cat: 'air', name: 'Intake manifold pressure', u: 'press', d: 1, f: (a) => a, more: 'Vacuum inside the intake. Low at idle, close to outside air pressure at full throttle.' },
+  { pid: '0B', id: 'map', cat: 'air', fast: 1, name: 'Intake manifold pressure', u: 'press', d: 1, f: (a) => a, more: 'Vacuum inside the intake. Low at idle, close to outside air pressure at full throttle.' },
   { pid: '33', id: 'baro', cat: 'air', name: 'Barometric pressure', u: 'press', d: 1, f: (a) => a, more: 'Outside air pressure. About 14.7 psi (101 kPa) at sea level.' },
   { pid: '3C', id: 'cat', cat: 'air', name: 'Catalytic converter temp', u: 'temp', d: 0, f: (a, b) => (a * 256 + b) / 10 - 40, st: (v) => v > 900 ? 'crit' : 'ok', more: 'Estimated temperature of the catalytic converter. 750 to 1,400°F (400 to 760°C) while driving is normal.' },
   // electrical
@@ -659,7 +660,7 @@ const M = [
   { pid: '15', id: 'o2b', cat: 'elec', name: 'Downstream O2 sensor', u: 'volt', d: 2, f: (a) => a / 200, more: 'Oxygen sensor after the catalytic converter. It should stay fairly steady. If it swings like the upstream one, the converter may be worn (code P0420).' },
   // emissions
   { pid: '2E', id: 'purge', cat: 'emis', name: 'Evap purge', u: 'pct', d: 0, f: (a) => a * 100 / 255, more: 'How much fuel vapor from the tank is being burned off. Part of the system that stops gas fumes escaping.' },
-  { pid: '31', id: 'sinceDist', cat: 'emis', name: 'Distance since codes cleared', u: 'dist', d: 0, f: (a, b) => a * 256 + b, more: 'Driving since the last code clear or battery disconnect. Inspections want this to be at least 100 or so miles.' },
+  { pid: '31', id: 'sinceDist', cat: 'emis', name: 'Distance since codes cleared', u: 'dist', d: 0, f: (a, b) => a * 256 + b, note: (v) => v >= 65535 ? 'Counter maxed out: no clear in a long time' : '', more: 'Driving since the last code clear or battery disconnect. Inspections want this to be at least 100 or so miles.' },
   { pid: '30', id: 'warmups', cat: 'emis', name: 'Warm-ups since cleared', u: 'count', d: 0, f: (a) => a, more: 'Times the engine fully warmed up since the last clear.' },
   { pid: '21', id: 'milDist', cat: 'emis', name: 'Driven with warning light', u: 'dist', d: 0, f: (a, b) => a * 256 + b, st: (v) => v > 0 ? 'warn' : 'ok', more: 'Distance driven while the check-engine light was on.' },
   { pid: '4E', id: 'sinceMin', cat: 'emis', name: 'Time since codes cleared', u: 'min', d: 0, f: (a, b) => a * 256 + b, show: (v) => [fmtMin(v), ''], more: 'Engine running time since the last clear.' },
@@ -772,9 +773,9 @@ const KNOWN_SERVICES = [
 ];
 const elm = {
   dev: null, rx: null, tx: null, buf: '', waiter: null, busy: Promise.resolve(),
-  async connect() {
+  async connect(known) {
     if (!navigator.bluetooth) throw Object.assign(new Error('no-bt'), { code: 'no-bt' });
-    this.dev = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: KNOWN_SERVICES });
+    this.dev = known || await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: KNOWN_SERVICES });
     log('Picked ' + (this.dev.name || 'device'));
     this.dev.addEventListener('gattserverdisconnected', onDisconnected);
     const gatt = await this.dev.gatt.connect();
@@ -845,25 +846,54 @@ function joinFrames(resp) {
 function parseDTCs(resp, modeEcho) {
   if (/NO ?DATA/i.test(resp)) return [];
   const isCan = /^[6-9AB]/.test(st.protocol);
-  const h = joinFrames(resp);
+  // split into one message per ECU: single lines, or ISO-TP multi-frame ("00A", "0:...", "1:...")
+  const msgs = []; let cur = null;
+  for (const raw of resp.split('\n')) {
+    const l = raw.replace(/\s/g, '').toUpperCase();
+    if (!/^[0-9A-F:]+$/.test(l)) continue;
+    if (/^[0-9A-F]{3}$/.test(l)) { cur = { len: parseInt(l, 16), hex: '' }; msgs.push(cur); continue; }
+    const m = l.match(/^([0-9A-F]):(.*)$/);
+    if (m && cur) { cur.hex += m[2]; continue; }
+    cur = null; msgs.push({ len: null, hex: l });
+  }
   const codes = [];
-  let i = h.indexOf(modeEcho);
-  while (i >= 0) {
-    let j = i + 2;
-    if (isCan) j += 2; // count byte
-    const end = h.indexOf(modeEcho, j) > 0 && !isCan ? h.indexOf(modeEcho, j) : h.length;
-    for (; j + 3 < end; j += 4) {
-      const w = h.slice(j, j + 4);
+  for (const msg of msgs) {
+    let h = msg.len ? msg.hex.slice(0, msg.len * 2) : msg.hex;
+    if (!h.startsWith(modeEcho)) continue;
+    let words;
+    if (isCan) { const n = parseInt(h.slice(2, 4), 16) || 0; words = h.slice(4, 4 + n * 4); }
+    else words = h.slice(2);
+    for (let j = 0; j + 3 < words.length; j += 4) {
+      const w = words.slice(j, j + 4);
       if (w === '0000') continue;
       const n = parseInt(w, 16);
       const c = 'PCBU'[n >> 14] + ((n >> 12) & 3) + w.slice(1);
       if (!codes.includes(c)) codes.push(c);
     }
-    if (isCan) break;
-    i = h.indexOf(modeEcho, end);
-    if (end === h.length) break;
   }
   return codes;
+}
+
+/* Kia instrument cluster odometer (not in standard OBD2). Accepts a value only if it is
+   close to the mileage already known, so a wrong guess can't corrupt the odometer. */
+async function readKiaOdo() {
+  try {
+    await elm.send('ATSH7C6');
+    const r = await elm.send('22B002', 4000);
+    await elm.send('ATSH7DF');
+    log('Cluster 22B002: ' + r.replace(/\n/g, ' ').slice(0, 120));
+    const h = joinFrames(r), i = h.indexOf('62B002');
+    if (i < 0) return;
+    const b = []; for (let j = i + 6; j + 1 < h.length; j += 2) b.push(parseInt(h.slice(j, j + 2), 16));
+    const known = getOdo()?.mi;
+    let best = null;
+    for (let k = 0; k + 2 < b.length; k++) {
+      const v = (b[k] << 16) | (b[k + 1] << 8) | b[k + 2];
+      for (const mi of [v * 0.621371, v]) if (known != null && Math.abs(mi - known) < 3000 && (!best || Math.abs(mi - known) < Math.abs(best - known))) best = mi;
+    }
+    if (best != null) { setOdo(best, 'car'); log('Odometer from cluster: ' + Math.round(best) + ' mi'); }
+    else log('Cluster answered, but no value matched your mileage yet');
+  } catch (e) { log('Cluster odometer not available'); await elm.send('ATSH7DF').catch(() => {}); }
 }
 
 async function initAdapter() {
@@ -923,6 +953,7 @@ async function pollLoop() {
       for (const m of fast) await readPid(m);
       for (let k = 0; k < 2 && slow.length; k++) await readPid(slow[si++ % slow.length]);
       if (cycle++ % 40 === 0) await readMil();
+      if (cycle % 1500 === 0) await readKiaOdo();
       tickTrip();
       render();
     } catch (e) { log('Read error: ' + e.message); await new Promise((r) => setTimeout(r, 400)); }
@@ -950,11 +981,19 @@ function tickTrip() {
   if (st.mode === 'live' && st.vals.odometer == null) addOdo(spd * dt * 0.621371);
   st.trip.max = Math.max(st.trip.max, spd);
   // fuel from fuel-rate PID, else MAF (stoich 14.7, gasoline ~740 g/L)
-  const lph = st.vals.rate != null ? st.vals.rate : st.vals.maf != null ? st.vals.maf * 3600 / (14.7 * 740) : null;
+  const lph = fuelLph();
   if (lph != null) st.trip.fuelL += lph * dt;
 }
+function airFlow() {
+  if (st.vals.maf != null) return st.vals.maf;
+  const { rpm, map, iat } = st.vals;
+  if (rpm == null || map == null || iat == null) return null;
+  // speed-density: 2.0 L displacement, ~85% volumetric efficiency
+  return 0.002 * (rpm / 120) * 0.85 * (map * 1000) / (287.05 * (iat + 273.15)) * 1000;
+}
+function fuelLph() { if (st.vals.rate != null) return st.vals.rate; const a = airFlow(); return a == null ? null : a * 3600 / (14.7 * 740); }
 function instantMpg() {
-  const lph = st.vals.rate != null ? st.vals.rate : st.vals.maf != null ? st.vals.maf * 3600 / (14.7 * 740) : null;
+  const lph = fuelLph();
   if (lph == null || !st.vals.speed) return null;
   const mpg = (st.vals.speed * 0.621371) / (lph / 3.785);
   return Math.min(mpg, 99);
@@ -993,19 +1032,20 @@ function startDemo() {
 function stopDemo() { clearInterval(demoT); demoT = null; }
 
 /* ---------- connect / disconnect ---------- */
-async function connect() {
+async function connect(known) {
   if (st.mode === 'live' || st.mode === 'connecting') { sheet(`<h3>Disconnect?</h3><p class="muted">Live data will stop.</p><div class="btn-row"><button class="btn" data-close type="button">Stay connected</button><button class="btn danger" id="dcYes" type="button">Disconnect</button></div>`); $('dcYes').onclick = () => { closeSheet(); stopLive(true); }; return; }
   if (st.mode === 'demo') { stopDemo(); st.mode = 'idle'; store.set('demo', false); resetAll(); }
   st.mode = 'connecting'; render();
   try {
-    await elm.connect();
+    await elm.connect(known && known.gatt ? known : undefined);
     toast('Talking to the car…');
     await initAdapter();
     st.mode = 'live'; fuelSeen = null; st.vals = {}; st.hist = {}; st.trip = { dist: 0, fuelL: 0, max: 0, start: 0, last: 0 };
     wake();
     render();
     toast('Connected');
-    scanCodes(true);
+    store.set('adName', elm.dev.name || '');
+    scanCodes(true).then(readKiaOdo);
     pollLoop();
   } catch (e) {
     st.mode = 'idle'; render();
@@ -1728,7 +1768,19 @@ $('apiKey').value = S.apiKey;
 $('apiKey').addEventListener('change', () => { S.apiKey = $('apiKey').value.trim(); store.set('apiKey', S.apiKey); toast('Key saved on this phone'); });
 samplePromise.then((s) => { $('keyCard').hidden = !!s; });
 
-$('connBtn').onclick = connect;
+$('connBtn').onclick = () => connect();
+async function autoReconnect() {
+  try {
+    const name = store.get('adName', null);
+    if (!name || !navigator.bluetooth?.getDevices) return;
+    const ds = await navigator.bluetooth.getDevices();
+    const d = ds.find((x) => x.name === name);
+    if (!d) return;
+    log('Reconnecting to ' + d.name);
+    if (st.mode === 'demo') { stopDemo(); st.mode = 'idle'; resetAll(); }
+    await connect(d);
+  } catch (e) { log('Auto-reconnect failed: ' + e.message); }
+}
 $('setupBtn').onclick = () => showTab('setup');
 $('scanBtn').onclick = () => scanCodes(false);
 $('clearBtn').onclick = () => { $('clearConfirm').hidden = false; };
@@ -1767,6 +1819,7 @@ renderPark();
 // open in demo so the first view shows what the app does; real connection replaces it
 if (store.get('demo', true)) startDemo(); else { render(); renderCodes(); }
 showTab(store.get('tab', 'overview'));
+autoReconnect();
 // keep the demo toggle in sync after boot
 setTimeout(() => document.querySelectorAll('#demoSeg button').forEach((b) => b.setAttribute('aria-pressed', String((st.mode === 'demo' ? '1' : '0') === b.dataset.v))), 0);
 })();
