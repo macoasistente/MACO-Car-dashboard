@@ -32,9 +32,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk MyDash-1.${{ github.run_number }}.apk
+          # Sophie.apk keeps older installs' update check working
           cp android/app/build/outputs/apk/debug/app-debug.apk Sophie.apk
           gh release delete android-latest --yes --cleanup-tag || true
-          gh release create android-latest Sophie.apk \
+          gh release create android-latest MyDash-1.${{ github.run_number }}.apk Sophie.apk \
             --title "MyDash for Android (build ${{ github.run_number }})" \
-            --notes "Install Sophie.apk (MyDash) on the Android phone. Built from ${{ github.sha }}." \
+            --notes "Install MyDash-1.${{ github.run_number }}.apk on the Android phone. Built from ${{ github.sha }}." \
             --prerelease

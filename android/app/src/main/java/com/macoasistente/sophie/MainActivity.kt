@@ -164,7 +164,7 @@ class MainActivity : AppCompatActivity() {
         checkForUpdate()
     }
 
-    private val apkUrl = "https://github.com/macoasistente/MACO-Car-dashboard/releases/download/android-latest/Sophie.apk"
+    private var apkUrl = "https://github.com/macoasistente/MACO-Car-dashboard/releases/download/android-latest/Sophie.apk"
     private var updateId = -1L
     private var wantUpdate = false
 
@@ -185,13 +185,13 @@ class MainActivity : AppCompatActivity() {
             return
         }
         try {
-            getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)?.let { File(it, "Sophie-update.apk").delete() }
+            getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)?.let { File(it, "MyDash-update.apk").delete() }
             val dm = getSystemService(DownloadManager::class.java)
             val req = DownloadManager.Request(Uri.parse(apkUrl))
                 .setTitle("MyDash update")
                 .setMimeType("application/vnd.android.package-archive")
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
-                .setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, "Sophie-update.apk")
+                .setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, "MyDash-update.apk")
             updateId = dm.enqueue(req)
             Toast.makeText(this, "Downloading the update…", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
@@ -231,12 +231,18 @@ class MainActivity : AppCompatActivity() {
             c.readTimeout = 8000
             val j = JSONObject(c.inputStream.bufferedReader().use { it.readText() })
             val build = Regex("build (\\d+)").find(j.optString("name"))?.groupValues?.get(1)?.toIntOrNull() ?: return@launch
+            j.optJSONArray("assets")?.let { assets ->
+                for (i in 0 until assets.length()) {
+                    val asset = assets.getJSONObject(i)
+                    if (asset.optString("name").startsWith("MyDash-")) apkUrl = asset.optString("browser_download_url", apkUrl)
+                }
+            }
             val prefs = getSharedPreferences("sophie", MODE_PRIVATE)
             if (build <= BuildConfig.VERSION_CODE || prefs.getInt("skipBuild", 0) == build) return@launch
             withContext(Dispatchers.Main) {
                 AlertDialog.Builder(this@MainActivity)
                     .setTitle("Update available")
-                    .setMessage("A newer version of the app is ready. Tap Update, then Install. Your data stays.")
+                    .setMessage("MyDash 1.$build is ready. Tap Update, then Install. Your data stays.")
                     .setPositiveButton("Update") { _, _ -> downloadUpdate() }
                     .setNegativeButton("Later") { _, _ -> prefs.edit().putInt("skipBuild", build).apply() }
                     .show()
