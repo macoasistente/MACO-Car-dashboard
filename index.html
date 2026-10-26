@@ -937,6 +937,7 @@ async function readMil() {
 function setVal(id, v) {
   st.vals[id] = v;
   if (id === 'odometer' && st.mode === 'live' && v > 0) setOdo(v * 0.621371, 'car');
+  if (id === 'fuel' && st.mode === 'live') checkFillUp(v);
   const h = st.hist[id] || (st.hist[id] = []);
   h.push(v); if (h.length > 90) h.shift();
 }
@@ -1000,7 +1001,7 @@ async function connect() {
     await elm.connect();
     toast('Talking to the car…');
     await initAdapter();
-    st.mode = 'live'; st.vals = {}; st.hist = {}; st.trip = { dist: 0, fuelL: 0, max: 0, start: 0, last: 0 };
+    st.mode = 'live'; fuelSeen = null; st.vals = {}; st.hist = {}; st.trip = { dist: 0, fuelL: 0, max: 0, start: 0, last: 0 };
     wake();
     render();
     toast('Connected');
@@ -1022,6 +1023,7 @@ async function connect() {
 }
 function stopLive(manual) { pollOn = false; if (st.mode === 'live' || st.mode === 'connecting') { st.mode = 'idle'; elm.disconnect(); } releaseWake(); if (manual) render(); }
 function onDisconnected() {
+  fuelSeen = null;
   if (st.mode !== 'live') return;
   log('Adapter disconnected');
   pollOn = false; st.mode = 'idle'; releaseWake(); render();
@@ -1627,6 +1629,22 @@ function renderCare() {
   $('careCount').hidden = !n; $('careCount').textContent = n;
 }
 
+/* ---------- fill-up detection: prompt a dipstick check ---------- */
+let fuelSeen = null;
+function checkFillUp(v) {
+  if (fuelSeen == null) { // first reading this connection: compare with last known level
+    const last = cstore.get('lastFuel', null);
+    if (last != null && v - last >= 20) { cstore.set('fillupT', Date.now()); toast('Filled up? Time for a quick oil check'); }
+    fuelSeen = v;
+  }
+  cstore.set('lastFuel', v);
+}
+function fillUpPending() {
+  const t = cstore.get('fillupT', 0); if (!t || Date.now() - t > 3 * 3600000) return false;
+  const last = oilLog()[oilLog().length - 1];
+  return !last || last.t < t;
+}
+
 /* ---------- alerts & notifications ---------- */
 const notified = new Set();
 let lastAlerts = 0;
@@ -1642,8 +1660,9 @@ function computeAlerts() {
     else if (v.volt != null && v.rpm > 500 && v.volt < 13) a.push({ k: 'v1', cls: 'warn', t: 'Battery isn\'t charging well', d: 'The alternator may be weak.', go: 'data' });
     if (v.fuel != null && v.fuel < 10) a.push({ k: 'fuel', cls: 'warn', t: 'Fuel is low', d: `About ${fmt(v.fuel * car().tank / 100, 1)} gal left.`, go: 'data' });
   }
+  if (fillUpPending()) a.push({ k: 'fillup-' + cstore.get('fillupT', 0), cls: 'warn', t: 'You just filled up. Check my oil?', d: 'Engine off 5 minutes, level ground. Log it in Care.', go: 'care' });
   const oil = oilStatus();
-  if (oil.due) a.push({ k: 'oil-' + oil.cls, cls: oil.cls === 'crit' ? 'crit' : 'warn', t: oil.title, d: `${name}'s engine is known to burn oil. Log a check in Care.`, go: 'care' });
+  if (oil.due && !fillUpPending()) a.push({ k: 'oil-' + oil.cls, cls: oil.cls === 'crit' ? 'crit' : 'warn', t: oil.title, d: `${name}'s engine is known to burn oil. Log a check in Care.`, go: 'care' });
   const rc = openRecalls();
   if (rc.length) a.push({ k: 'recall-' + rc.map((r) => r.id).join(), cls: 'warn', t: `${rc.length} open recall${rc.length > 1 ? 's' : ''} to check`, d: rc.map((r) => r.name.split(' ')[0] + ' ' + r.name.split(' ')[1]).join(', ') + '. Free at a Kia dealer.', go: 'care' });
   const due = maintDue();
