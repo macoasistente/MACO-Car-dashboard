@@ -160,6 +160,7 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch { Hub.logs.collect { js("log", JSONObject().put("type", "log").put("text", it)) } }
         if (Hub.park.value == null) Hub.park.value = getSharedPreferences("sophie", MODE_PRIVATE).getString("park", null)
         lifecycleScope.launch { Hub.park.collect { p -> if (p != null) js("park", JSONObject().put("type", "park").put("p", JSONObject(p))) } }
+        lifecycleScope.launch { Hub.volts.collect { if (pageReady) web.evaluateJavascript("window.__sophieNative&&window.__sophieNative({type:'volts',s:$it})", null) } }
         lifecycleScope.launch { Hub.cluster.collect { js("cluster", JSONObject().put("type", "cluster").put("resp", it)) } }
 
         if (hasPerms()) afterPermissions() else askPerms.launch(perms)
@@ -332,6 +333,7 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface fun disconnect() = ObdService.send(this@MainActivity, ObdService.ACTION_DISCONNECT)
         @JavascriptInterface fun scanCodes() = ObdService.send(this@MainActivity, ObdService.ACTION_SCAN_CODES)
+        @JavascriptInterface fun voltBurst(ms: Int) { Hub.voltFastUntil = System.currentTimeMillis() + ms.coerceIn(0, 60000) }
         @JavascriptInterface fun clearCodes() = ObdService.send(this@MainActivity, ObdService.ACTION_CLEAR_CODES)
 
         @JavascriptInterface fun setInfo(json: String) { Hub.parseInfo(json)?.let { Hub.info.value = it } }

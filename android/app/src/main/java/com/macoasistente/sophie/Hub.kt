@@ -51,6 +51,9 @@ object Hub {
     val info = MutableStateFlow(CarInfo())
     val logs = MutableSharedFlow<String>(replay = 40, extraBufferCapacity = 64)
     val cluster = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    /** Battery test: until this time (ms) the service reads only adapter voltage, as fast as it can. */
+    @Volatile var voltFastUntil = 0L
+    val volts = MutableSharedFlow<String>(extraBufferCapacity = 16)
 
     fun update(f: (Snap) -> Snap) = state.update(f)
 

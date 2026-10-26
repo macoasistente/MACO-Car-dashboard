@@ -427,6 +427,7 @@ class ObdService : Service() {
         readCluster()
         while (currentCoroutineContext().isActive && !userStopped && !linkDown) {
             try {
+                if (System.currentTimeMillis() < Hub.voltFastUntil) { voltBurst(); continue }
                 for (p in fast) readPid(p)
                 repeat(minOf(2, slow.size)) { readPid(slow[si++ % slow.size]) }
                 if (cycle++ % 40 == 0) readMil()
@@ -443,6 +444,19 @@ class ObdService : Service() {
             }
         }
         if (linkDown) throw Exception("disconnected")
+    }
+
+    /** Samples adapter voltage ~10-20 times a second for the battery test (catches the dip while cranking). */
+    private suspend fun voltBurst() {
+        val out = StringBuilder()
+        var sent = System.currentTimeMillis()
+        while (System.currentTimeMillis() < Hub.voltFastUntil && !linkDown) {
+            val r = try { send("ATRV", 1500) } catch (e: Exception) { if (linkDown) throw e; "" }
+            val v = Regex("(\\d+\\.\\d+)").find(r)?.value?.toDoubleOrNull()
+            if (v != null) out.append(if (out.isEmpty()) "" else ",").append("[${System.currentTimeMillis()},$v]")
+            if (System.currentTimeMillis() - sent > 250 && out.isNotEmpty()) { Hub.volts.tryEmit("[$out]"); out.setLength(0); sent = System.currentTimeMillis() }
+        }
+        if (out.isNotEmpty()) Hub.volts.tryEmit("[$out]")
     }
 
     private suspend fun scanCodes() {

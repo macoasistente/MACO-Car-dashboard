@@ -387,6 +387,11 @@ nav.tabs {
 .wx .hr { text-align: center; font-size: 12px; color: var(--fg-2); font-variant-numeric: tabular-nums; }
 .wx .hr b { display: block; color: var(--fg); font-size: 14px; }
 .wx-alert { margin-top: 10px; padding: 10px 12px; border-radius: 14px; background: rgba(255,69,58,.14); border: 1px solid rgba(255,69,58,.35); font-size: 13.5px; }
+.bt-last { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--hairline); background: rgba(255,255,255,.05); color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.bt-last b { display: block; font-size: 15px; } .bt-last .muted { font-size: 13px; }
+.bt-big { font: 700 44px var(--font-display); letter-spacing: -.02em; text-align: center; margin: 8px 0 2px; font-variant-numeric: tabular-nums; }
+.bt-steps { display: flex; gap: 6px; margin: 4px 0 12px; } .bt-steps i { flex: 1; height: 4px; border-radius: 2px; background: rgba(255,255,255,.12); } .bt-steps i.on { background: var(--ok); }
+.bt-res { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; } .bt-res > div { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 14px; background: rgba(255,255,255,.05); } .bt-res .dot { margin-top: 6px; }
 .wx-list { display: flex; flex-direction: column; gap: 2px; margin: 10px 0; }
 .wx-list > div { display: flex; justify-content: space-between; gap: 12px; padding: 8px 2px; border-bottom: 1px solid var(--hairline); font-variant-numeric: tabular-nums; }
 /* power */
@@ -517,6 +522,7 @@ nav.tabs {
       <div class="muted" style="font-size:13px" id="pwLimit"></div>
       <div class="set" style="padding:0;border:0"><div><div class="t">Inverter is plugged into</div><div class="d">The 12V socket has a fuse limit; a battery hookup doesn't</div></div><div class="seg" id="pwOutSeg"><button type="button" data-v="socket">12V socket</button><button type="button" data-v="battery">Battery</button></div></div>
       <div class="pw-items" id="pwItems"></div>
+      <button type="button" class="bt-last" id="btOpen"><span><b>Battery and alternator test</b><span class="muted" id="btLast">Like the battery shop's tester. Takes about 3 minutes.</span></span><span aria-hidden="true">›</span></button>
       <div class="inline"><select id="pwAdd" aria-label="Add a device"><option value="">Add what's plugged in…</option><option value="Air freshener|5">Air freshener · 5 W</option><option value="Phone charger|15">Phone charger · 15 W</option><option value="Fan|40">Fan · 40 W</option><option value="Laptop|65">Laptop · 65 W</option><option value="Cooler|60">Electric cooler · 60 W</option><option value="Tablet|20">Tablet · 20 W</option><option value="Air pump|120">Air pump · 120 W</option><option value="custom">Something else…</option></select></div>
     </div>
     <div class="section-title">Oil watch</div>
@@ -990,7 +996,7 @@ async function readPid(m) {
   setVal(m.id, m.f(b[0], b[1] ?? 0, b[2] ?? 0, b[3] ?? 0));
 }
 
-let pollOn = false;
+let pollOn = false, voltFastUntil = 0;
 async function pollLoop() {
   pollOn = true;
   const sup = (m) => !st.supported || st.supported.has(m.pid);
@@ -999,6 +1005,7 @@ async function pollLoop() {
   let si = 0, cycle = 0;
   while (pollOn && st.mode === 'live') {
     try {
+      if (Date.now() < voltFastUntil) { const v = parseFloat((await elm.send('ATRV')).replace(/[^\d.]/g, '')); if (v > 0) onVolts([[Date.now(), v]]); continue; }
       for (const m of fast) await readPid(m);
       for (let k = 0; k < 2 && slow.length; k++) await readPid(slow[si++ % slow.length]);
       if (cycle++ % 40 === 0) await readMil();
@@ -1086,6 +1093,7 @@ let nativeDist = null, nativeCodes = '';
 window.__sophieNative = (msg) => {
   if (msg.type === 'log') { log(msg.text); return; }
   if (msg.type === 'cluster') { parseClusterOdo(msg.resp); return; }
+  if (msg.type === 'volts') { onVolts(msg.s); return; }
   if (msg.type === 'park') {
     // spot saved by the background service when the engine turned off
     const p = msg.p, cur = loadPark();
@@ -1992,8 +2000,8 @@ function powerState() {
   const v = st.vals.volt, rpm = st.vals.rpm, on = st.mode === 'live' || st.mode === 'demo';
   const w = powerW(), pw = power(), run = rpm > 400;
   if (on && v != null) {
-    if (run && v < 12.8) return { cls: 'crit', title: w ? 'Too much plugged in' : 'Battery isn\'t charging', text: w ? 'The alternator can\'t keep up. Unplug something from the inverter now.' : 'The alternator may be failing. Get the charging system tested.' };
-    if (run && v < 13.3) return { cls: 'warn', title: 'Charging is weak', text: w ? 'The electrical system is working hard. Unplug the biggest item or raise the idle by driving.' : 'Voltage is a little low for a running engine. Watch it.' };
+    if (run && v < 12.4) return { cls: 'crit', title: w ? 'Too much plugged in' : 'Battery isn\'t charging', text: w ? 'The alternator can\'t keep up. Unplug something from the inverter now.' : 'The alternator may be failing. Get the charging system tested.' };
+    if (run && v < 12.8) return { cls: 'warn', title: 'Charging is weak', text: w ? 'The electrical system is working hard. Unplug the biggest item or raise the idle by driving.' : 'Voltage is a little low for a running engine. Watch it.' };
     if (!run && v < 12.0) return { cls: 'crit', title: 'Battery low, start the engine', text: 'Below 12.0 V with the engine off, the car may not start. Unplug things and start the engine now.' };
     if (!run && v < 12.3) return { cls: 'warn', title: 'Battery draining', text: w ? `Running ${w} W with the engine off. Start the engine soon or unplug things.` : 'The battery is getting low with the engine off.' };
     if (run) return { cls: 'ok', title: 'Charging normally', text: w ? `The alternator is handling the ${w} W you have plugged in.` : 'The alternator is charging the battery.' };
@@ -2028,6 +2036,111 @@ $('pwAdd').onchange = () => {
   }
   const [n, w] = v.split('|'); const p = power(); p.items.push({ n, w: +w }); cstore.set('power', p); renderPower();
 };
+
+/* ---------- battery and alternator test (what the parts-store tester does, minus the CCA clamp) ---------- */
+let btSink = null, btDemoT = null;
+function onVolts(arr) { if (btSink) for (const x of arr) btSink(x[0], x[1]); }
+function voltBurst(ms) {
+  if (st.mode === 'demo') {
+    // sample data: resting 12.5 V, a crank dip to ~10.3 V, then charging at ~14.3 V
+    clearInterval(btDemoT); const t0 = Date.now();
+    btDemoT = setInterval(() => { const t = Date.now() - t0; if (t > ms) return clearInterval(btDemoT);
+      const v = btDemo.phase === 'rest' ? 12.52 + Math.random() * 0.02 : btDemo.phase === 'run' ? 14.3 + Math.random() * 0.05 : t < 2500 ? 12.5 : t < 3300 ? 10.25 + Math.random() * 0.3 : 14.3 + Math.random() * 0.05;
+      onVolts([[Date.now(), v]]); }, 70);
+    return;
+  }
+  if (NATIVE) SophieNative.voltBurst(ms); else voltFastUntil = Date.now() + ms;
+}
+const btDemo = { phase: 'rest' };
+function collectVolts(ms) { return new Promise((res) => { const s = []; btSink = (t, v) => s.push(v); voltBurst(ms); setTimeout(() => { btSink = null; res(s); }, ms + 300); }); }
+const avg = (a) => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
+const pct = (v) => v >= 12.65 ? 100 : v >= 12.45 ? 75 : v >= 12.24 ? 50 : v >= 12.06 ? 25 : 0;
+function btSheet(step, body, buttons) {
+  sheet(`<h3>Battery and alternator test</h3><div class="bt-steps">${[1, 2, 3, 4].map((i) => `<i class="${i <= step ? 'on' : ''}"></i>`).join('')}</div>${body}<div class="btn-row">${buttons}</div>`);
+}
+const bt = {};
+$('btOpen').onclick = () => {
+  if (st.mode !== 'live' && st.mode !== 'demo') { toast('Connect to the car first'); return; }
+  Object.keys(bt).forEach((k) => delete bt[k]); btDemo.phase = 'rest';
+  const run = st.mode === 'live' && (st.vals.rpm || 0) > 400;
+  btSheet(0, `<p>This checks the battery while it rests and while it starts the car, then checks that the alternator charges it.</p><p class="muted">${run ? '<b>Turn the engine off first</b> and wait a minute. Leave the key in (or the button on Accessory) so the app stays connected.' : 'Engine off, everything off (lights, AC, radio). Unplug the inverter. Best done when the car has sat for an hour or more.'}</p>`,
+    `<button class="btn" data-close type="button">Cancel</button><button class="btn primary" id="btGo" type="button">Start</button>`);
+  $('btGo').onclick = btRest;
+};
+async function btRest() {
+  if (st.mode === 'live' && (st.vals.rpm || 0) > 400) { toast('Turn the engine off first'); return; }
+  btSheet(1, `<p class="muted">Step 1 of 4 · Resting battery</p><div class="bt-big">…</div><p class="muted" style="text-align:center">Reading the battery…</p>`, '');
+  const s = await collectVolts(3000);
+  bt.rest = avg(s);
+  if (bt.rest == null) return btFail('The adapter didn\'t answer. Make sure it\'s connected and try again.');
+  btSheet(1, `<p class="muted">Step 1 of 4 · Resting battery</p><div class="bt-big">${fmt(bt.rest, 2)} V</div><p style="text-align:center">About ${pct(bt.rest)}% charged</p><p class="muted">Next: get ready to start the engine. After you tap Ready, start it within 10 seconds.</p>`,
+    `<button class="btn" data-close type="button">Cancel</button><button class="btn primary" id="btGo" type="button">Ready</button>`);
+  $('btGo').onclick = btCrank;
+}
+async function btCrank() {
+  btSheet(2, `<p class="muted">Step 2 of 4 · Starting power</p><div class="bt-big" id="btLive">${fmt(bt.rest, 1)} V</div><p style="text-align:center"><b>Start the engine now.</b></p><p class="muted" style="text-align:center">Watching the voltage while it cranks…</p>`, '');
+  btDemo.phase = 'crank';
+  const s = []; let min = 99, after = [];
+  await new Promise((res) => {
+    btSink = (t, v) => { s.push(v); if (v < min) min = v; if (min < bt.rest - 0.8 && v > bt.rest + 0.3) after.push(v); const el = $('btLive'); if (el) el.textContent = fmt(v, 1) + ' V'; };
+    voltBurst(15000);
+    const stop = setInterval(() => { if (after.length > 15) { clearInterval(stop); clearTimeout(to); res(); } }, 200);
+    const to = setTimeout(() => { clearInterval(stop); res(); }, 15300);
+  });
+  btSink = null; btDemo.phase = 'run'; voltBurst(0);
+  if (!(min < bt.rest - 0.8)) return btFail('I didn\'t see the engine crank. Turn it off, wait a minute and try again.', true);
+  bt.crank = min;
+  btSheet(3, `<p class="muted">Step 3 of 4 · Charging at idle</p><div class="bt-big">…</div><p class="muted" style="text-align:center">Lowest while starting: <b>${fmt(min, 1)} V</b>. Now let it idle with everything off.</p>`, '');
+  await new Promise((r) => setTimeout(r, 8000));
+  bt.idle = avg(await collectVolts(4000));
+  btSheet(4, `<p class="muted">Step 4 of 4 · Alternator under load</p><div class="bt-big">${fmt(bt.idle, 2)} V</div><p style="text-align:center">at idle</p><p>Now turn on the <b>headlights</b>, <b>AC fan on high</b> and the <b>rear defrost</b>. Then tap Go and hold the engine around <b>2,000 RPM</b> for 10 seconds (in Park).</p>`,
+    `<button class="btn" data-close type="button">Cancel</button><button class="btn primary" id="btGo" type="button">Go</button>`);
+  $('btGo').onclick = btLoad;
+}
+async function btLoad() {
+  btSheet(4, `<p class="muted">Step 4 of 4 · Alternator under load</p><div class="bt-big" id="btLive">…</div><p style="text-align:center" id="btRpm">Hold about 2,000 RPM</p>`, '');
+  const vs = [];
+  await new Promise((res) => { let n = 0; const t = setInterval(() => {
+    const v = st.vals.volt, r = st.vals.rpm;
+    if (v != null) vs.push(v);
+    const el = $('btLive'); if (el) el.textContent = fmt(v, 1) + ' V';
+    const er = $('btRpm'); if (er) er.textContent = r != null ? `${fmt(r)} RPM · hold about 2,000` : 'Hold about 2,000 RPM';
+    if (++n >= 20) { clearInterval(t); res(); } }, 500); });
+  bt.load = vs.length ? Math.min(...vs.slice(4).length ? vs.slice(4) : vs) : null;
+  btResult();
+}
+function btGrade() {
+  const b = bt.rest >= 12.4 && bt.crank >= 10 ? 'ok' : bt.rest < 12.0 || bt.crank < 9.6 ? 'crit' : 'warn';
+  const a = bt.idle > 15.0 || (bt.load != null && bt.load < 12.8) || bt.idle < 12.6 ? 'crit' : (bt.load != null && bt.load < 13.2) ? 'warn' : 'ok';
+  const bt1 = { ok: 'Battery is good', warn: 'Battery is getting weak', crit: 'Battery needs attention' }[b];
+  const bd = b === 'ok' ? `Rested at ${fmt(bt.rest, 2)} V and only dropped to ${fmt(bt.crank, 1)} V while starting. Healthy.`
+    : bt.rest < 12.4 && bt.crank >= 10 ? `It started fine (${fmt(bt.crank, 1)} V) but rested low at ${fmt(bt.rest, 2)} V. It may just need a long drive or a charger. Test again after.`
+    : `It dropped to ${fmt(bt.crank, 1)} V while starting${bt.crank < 9.6 ? ', below the 9.6 V a healthy battery holds' : ''}. ${b === 'crit' ? 'Have it load-tested at a parts store (free) before it leaves you stranded.' : 'Plan to replace it soon, especially before summer.'}`;
+  const at = { ok: 'Alternator is charging well', warn: 'Alternator is a little weak', crit: bt.idle > 15.0 ? 'Alternator is overcharging' : 'Alternator isn\'t keeping up' }[a];
+  const ad = a === 'ok' ? `${fmt(bt.idle, 1)} V at idle and ${fmt(bt.load, 1)} V with lights, AC and defrost on.`
+    : bt.idle > 15.0 ? `${fmt(bt.idle, 1)} V is too high and can cook the battery. Have the charging system checked.`
+    : `Only ${fmt(bt.load ?? bt.idle, 1)} V with everything on. ${a === 'crit' ? 'Get the charging system tested soon.' : 'Watch it, and retest in a month.'}`;
+  return { b, a, bt1, bd, at, ad };
+}
+function btResult() {
+  const g = btGrade(), r = { t: Date.now(), rest: +bt.rest.toFixed(2), crank: +bt.crank.toFixed(2), idle: +(bt.idle ?? 0).toFixed(2), load: bt.load != null ? +bt.load.toFixed(2) : null, b: g.b, a: g.a };
+  const h = cstore.get('battTests', []); h.push(r); cstore.set('battTests', h.slice(-24));
+  const prev = h.length > 1 ? h[h.length - 2] : null;
+  const trend = prev ? `<p class="muted" style="font-size:13px">Last test ${new Date(prev.t).toLocaleDateString()}: started at ${fmt(prev.crank, 1)} V, today ${fmt(r.crank, 1)} V${r.crank < prev.crank - 0.3 ? ' — weaker than before' : ''}.</p>` : '';
+  sheet(`<h3>Test results</h3><div class="bt-res"><div><span class="dot ${g.b}"></span><span><b>${g.bt1}</b><br><span class="muted">${g.bd}</span></span></div><div><span class="dot ${g.a}"></span><span><b>${g.at}</b><br><span class="muted">${g.ad}</span></span></div></div>${trend}<p class="muted" style="font-size:12px">You can turn the lights, AC and defrost back off. A shop tester also measures cold cranking amps with a clamp; the starting-voltage dip is a close stand-in.</p><div class="btn-row"><button class="btn primary" data-close type="button">Done</button></div>`);
+  renderBattLast();
+}
+function btFail(msg, retry) {
+  btSink = null; btDemo.phase = 'rest';
+  btSheet(0, `<p>${msg}</p>`, `<button class="btn" data-close type="button">Close</button>${retry ? '<button class="btn primary" id="btGo" type="button">Try again</button>' : ''}`);
+  if (retry) $('btGo').onclick = btRest;
+}
+function renderBattLast() {
+  const h = cstore.get('battTests', []), r = h[h.length - 1];
+  if (!r) { $('btLast').textContent = 'Like the battery shop\'s tester. Takes about 3 minutes.'; return; }
+  const w = { ok: 'good', warn: 'watch', crit: 'needs attention' };
+  $('btLast').textContent = `Last test ${new Date(r.t).toLocaleDateString()}: battery ${w[r.b]}, alternator ${w[r.a]}. Tap to test again.`;
+}
 
 /* ---------- backup / restore ---------- */
 function backupData() {
@@ -2067,7 +2180,7 @@ $('restoreIn').onchange = async () => {
 };
 
 /* ---------- boot ---------- */
-seedRecord(); applyCar(); buildTiles(); buildGroups(); renderCare(); renderPower(); syncNotif(); loadWeather(false);
+seedRecord(); applyCar(); buildTiles(); buildGroups(); renderCare(); renderPower(); renderBattLast(); syncNotif(); loadWeather(false);
 renderPark();
 // open in demo so the first view shows what the app does; real connection replaces it
 if (store.get('demo', true)) startDemo(); else { render(); renderCodes(); }
