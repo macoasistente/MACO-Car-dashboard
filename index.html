@@ -376,6 +376,24 @@ nav.tabs {
 .sheet h3 { margin: 0; font-size: 20px; }
 .sheet ol { margin: 0; padding-left: 20px; color: var(--fg-2); display: flex; flex-direction: column; gap: 6px; }
 .toast { position: fixed; z-index: 40; left: 50%; transform: translateX(-50%); top: calc(14px + env(safe-area-inset-top, 0px)); padding: 10px 16px; border-radius: 999px; font-weight: 600; font-size: 14px; background: rgba(40,46,60,.8); }
+
+/* weather */
+.wx { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; padding: 14px 18px; cursor: pointer; text-align: left; width: 100%; font: inherit; color: inherit; background: transparent; border: 0; border-radius: inherit; }
+.wx > div:nth-child(2) { flex: 1; }
+.wx .big { font: 700 30px var(--font-display); letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.wx .sky { font-weight: 600; font-size: 15px; }
+.wx .sub { color: var(--fg-2); font-size: 13px; }
+.wx .hrs { flex-basis: 100%; display: flex; justify-content: space-between; gap: 8px; padding-top: 8px; border-top: 1px solid var(--hairline); }
+.wx .hr { text-align: center; font-size: 12px; color: var(--fg-2); font-variant-numeric: tabular-nums; }
+.wx .hr b { display: block; color: var(--fg); font-size: 14px; }
+.wx-alert { margin-top: 10px; padding: 10px 12px; border-radius: 14px; background: rgba(255,69,58,.14); border: 1px solid rgba(255,69,58,.35); font-size: 13.5px; }
+.wx-list { display: flex; flex-direction: column; gap: 2px; margin: 10px 0; }
+.wx-list > div { display: flex; justify-content: space-between; gap: 12px; padding: 8px 2px; border-bottom: 1px solid var(--hairline); font-variant-numeric: tabular-nums; }
+/* power */
+.pw-items { display: flex; flex-wrap: wrap; gap: 8px; }
+.pw-items .chip { display: inline-flex; gap: 6px; align-items: center; }
+.pw-bar { height: 8px; border-radius: 4px; background: rgba(255,255,255,.1); overflow: hidden; }
+.pw-bar > i { display: block; height: 100%; border-radius: 4px; background: var(--ok); transition: width .3s; }
 </style>
 
 <div class="ambient" aria-hidden="true"><i></i><i></i><i></i></div>
@@ -431,6 +449,7 @@ nav.tabs {
       </div>
     </div>
     <div id="alerts" class="alerts"></div>
+    <div class="glass" id="wxCard" hidden><button type="button" class="wx" id="wxBtn"><div><div class="big" id="wxTemp">–</div></div><div style="min-width:0"><div class="sky" id="wxSky">Weather</div><div class="sub" id="wxSub"></div></div><div class="hrs" id="wxHrs"></div></button><div id="wxAlert" class="wx-alert" style="margin:0 14px 14px" hidden></div></div>
     <div id="srcBadgeRow" hidden><span class="badge demo">Sample data · demo mode</span></div>
     <div class="gauges">
       <div class="glass gauge"><svg viewBox="0 0 160 120" aria-hidden="true"><path d="M20 105 A70 70 0 1 1 140 105" fill="none" stroke="rgba(255,255,255,.09)" stroke-width="10" stroke-linecap="round" pathLength="100"/><path id="gSpeed" d="M20 105 A70 70 0 1 1 140 105" fill="none" stroke="url(#gradA)" stroke-width="10" stroke-linecap="round" pathLength="100" stroke-dasharray="0 100"/><defs><linearGradient id="gradA" x1="0" x2="1"><stop offset="0" stop-color="#5ac8fa"/><stop offset="1" stop-color="#7d7aff"/></linearGradient><linearGradient id="gradB" x1="0" x2="1"><stop offset="0" stop-color="#32d74b"/><stop offset=".7" stop-color="#ffd60a"/><stop offset="1" stop-color="#ff453a"/></linearGradient></defs></svg><div class="val" id="speedVal">–</div><div class="unit" id="speedUnit">mph</div><div class="lbl">Speed</div></div>
@@ -490,6 +509,16 @@ nav.tabs {
       <div class="field"><label for="odoIn">Mileage on the dash</label><div class="inline"><input type="text" inputmode="numeric" id="odoIn" placeholder="e.g. 68,420"><button class="btn" id="odoSet" type="button">Update</button></div></div>
     </div>
 
+    <div class="section-title">Power and battery</div>
+    <div class="glass card-pad" id="pwCard">
+      <div class="oil-hd"><span class="dot" id="pwDot"></span><div style="min-width:0"><div style="font-weight:650;font-size:17px" id="pwTitle">Battery</div><div class="muted" id="pwText">Connect to see live voltage.</div></div></div>
+      <div class="meta3"><div><div class="k">Voltage</div><div class="v" id="pwVolt">–</div></div><div><div class="k">Plugged in</div><div class="v" id="pwWatts">0 W</div></div><div><div class="k">Engine off</div><div class="v" id="pwHours">–</div></div></div>
+      <div class="pw-bar" aria-hidden="true"><i id="pwBar" style="width:0"></i></div>
+      <div class="muted" style="font-size:13px" id="pwLimit"></div>
+      <div class="set" style="padding:0;border:0"><div><div class="t">Inverter is plugged into</div><div class="d">The 12V socket has a fuse limit; a battery hookup doesn't</div></div><div class="seg" id="pwOutSeg"><button type="button" data-v="socket">12V socket</button><button type="button" data-v="battery">Battery</button></div></div>
+      <div class="pw-items" id="pwItems"></div>
+      <div class="inline"><select id="pwAdd" aria-label="Add a device"><option value="">Add what's plugged in…</option><option value="Air freshener|5">Air freshener · 5 W</option><option value="Phone charger|15">Phone charger · 15 W</option><option value="Fan|40">Fan · 40 W</option><option value="Laptop|65">Laptop · 65 W</option><option value="Cooler|60">Electric cooler · 60 W</option><option value="Tablet|20">Tablet · 20 W</option><option value="Air pump|120">Air pump · 120 W</option><option value="custom">Something else…</option></select></div>
+    </div>
     <div class="section-title">Oil watch</div>
     <div class="glass card-pad" id="oilCard">
       <div class="oil-hd"><span class="dot" id="oilDot"></span><div style="min-width:0"><div style="font-weight:650;font-size:17px" id="oilTitle">Check the dipstick</div><div class="muted" id="oilText">This engine is known to burn oil, and the car has no oil-level sensor the app can read. A quick dipstick check every 1,000 miles or two weeks catches it early.</div></div></div>
@@ -1763,10 +1792,11 @@ function computeAlerts() {
     else if (st.codes.pending.length) a.push({ k: 'pend', cls: 'warn', t: 'A problem may be developing', d: `Pending code ${st.codes.pending[0]}. No warning light yet.`, go: 'codes' });
     if (v.coolant > 112) a.push({ k: 'hot2', cls: 'crit', t: 'Engine is overheating', d: 'Pull over safely and turn the engine off.', go: 'data' });
     else if (v.coolant > 105) a.push({ k: 'hot', cls: 'warn', t: 'Engine running hot', d: 'Ease off and watch the temperature.', go: 'data' });
-    if (v.volt != null && v.volt < 11.8) a.push({ k: 'v2', cls: 'crit', t: 'Battery voltage very low', d: 'The car may not restart. Get the battery and alternator tested.', go: 'data' });
-    else if (v.volt != null && v.rpm > 500 && v.volt < 13) a.push({ k: 'v1', cls: 'warn', t: 'Battery isn\'t charging well', d: 'The alternator may be weak.', go: 'data' });
+    const ps = powerState();
+    if (ps.cls === 'crit' || ps.cls === 'warn') a.push({ k: 'pw-' + ps.title, cls: ps.cls, t: ps.title, d: ps.text, go: 'care' });
     if (v.fuel != null && v.fuel < 10) a.push({ k: 'fuel', cls: 'warn', t: 'Fuel is low', d: `About ${fmt(v.fuel * car().tank / 100, 1)} gal left.`, go: 'data' });
   }
+  if (power().outlet === 'socket' && powerW() > SOCKET_W) a.push({ k: 'pw-over', cls: 'warn', t: 'Too much for the 12V socket', d: `${powerW()} W plugged in; the socket handles about ${SOCKET_W} W.`, go: 'care' });
   if (oilWatch() && fillUpPending()) a.push({ k: 'fillup-' + cstore.get('fillupT', 0), cls: 'warn', t: 'You just filled up. Check my oil?', d: 'Engine off 5 minutes, level ground. Log it in Care.', go: 'care' });
   const oil = oilStatus();
   if (oilWatch() && oil.due && !fillUpPending()) a.push({ k: 'oil-' + oil.cls, cls: oil.cls === 'crit' ? 'crit' : 'warn', t: oil.title, d: `${isSophie() ? name + '\'s engine is known to burn oil. ' : ''}Log a check in Care.`, go: 'care' });
@@ -1779,6 +1809,7 @@ function computeAlerts() {
 function renderAlerts() {
   const now = performance.now(); if (now - lastAlerts < 900) return; lastAlerts = now;
   const a = computeAlerts();
+  renderPower();
   const shown = a.filter((x) => x.k !== 'mil' && x.k !== 'pend');
   $('alerts').innerHTML = shown.slice(0, 3).map((x, i) => `<button type="button" class="alert ${x.cls}" data-i="${i}"><span class="dot ${x.cls}"></span><span><b>${esc(x.t)}</b><span class="t">${esc(x.d)}</span></span></button>`).join('');
   $('alerts').querySelectorAll('.alert').forEach((b) => b.onclick = () => showTab(shown[+b.dataset.i].go));
@@ -1886,6 +1917,118 @@ $('reportBtn2').onclick = copyReport;
 
 $('aboutYear').textContent = new Date().getFullYear();
 
+
+/* ---------- weather (Open-Meteo, plus National Weather Service alerts in the US) ---------- */
+const WX = { 0: 'Clear', 1: 'Mostly clear', 2: 'Partly cloudy', 3: 'Cloudy', 45: 'Fog', 48: 'Fog', 51: 'Light drizzle', 53: 'Drizzle', 55: 'Heavy drizzle', 61: 'Light rain', 63: 'Rain', 65: 'Heavy rain', 66: 'Freezing rain', 67: 'Freezing rain', 71: 'Light snow', 73: 'Snow', 75: 'Heavy snow', 80: 'Showers', 81: 'Showers', 82: 'Heavy showers', 95: 'Thunderstorms', 96: 'Thunderstorms, hail', 99: 'Thunderstorms, hail' };
+const uvWord = (u) => u >= 11 ? 'extreme' : u >= 8 ? 'very high' : u >= 6 ? 'high' : u >= 3 ? 'moderate' : 'low';
+let wxBusy = false;
+function wxPlace() {
+  return new Promise((res) => {
+    const park = loadPark();
+    const fallback = () => res(park && park.lat != null ? { lat: park.lat, lng: park.lng } : store.get('wxPlace', null));
+    if (!navigator.geolocation) return fallback();
+    navigator.geolocation.getCurrentPosition((p) => { const pl = { lat: +p.coords.latitude.toFixed(3), lng: +p.coords.longitude.toFixed(3) }; store.set('wxPlace', pl); res(pl); }, fallback, { timeout: 10000, maximumAge: 600000 });
+  });
+}
+async function loadWeather(force) {
+  const c = store.get('wx', null);
+  if (c) renderWeather(c);
+  if (wxBusy || (!force && c && Date.now() - c.t < 30 * 60000)) return;
+  wxBusy = true;
+  try {
+    const pl = await wxPlace();
+    if (!pl) return;
+    const u = `https://api.open-meteo.com/v1/forecast?latitude=${pl.lat}&longitude=${pl.lng}&current=temperature_2m,apparent_temperature,weather_code,uv_index&hourly=temperature_2m,precipitation_probability,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,uv_index_max&timezone=auto&forecast_days=3`;
+    const r = await fetch(u); if (!r.ok) throw new Error('weather ' + r.status);
+    const d = await r.json();
+    let alerts = [];
+    try {
+      const a = await fetch(`https://api.weather.gov/alerts/active?point=${pl.lat},${pl.lng}`, { headers: { Accept: 'application/geo+json' } });
+      if (a.ok) alerts = ((await a.json()).features || []).map((f) => ({ ev: f.properties.event, head: f.properties.headline, sev: f.properties.severity, ends: f.properties.ends || f.properties.expires }));
+    } catch {}
+    const w = { t: Date.now(), d, alerts };
+    store.set('wx', w); renderWeather(w);
+    for (const al of alerts) if (/Hurricane|Tropical Storm|Tornado|Flood|Heat/i.test(al.ev) && !notified.has('wx-' + al.ev)) { notified.add('wx-' + al.ev); pushNotify({ k: 'wx-' + al.ev, t: al.ev, d: al.head || '' }); }
+  } catch (e) { log('Weather unavailable: ' + e.message); }
+  finally { wxBusy = false; }
+}
+const tC = (c) => Math.round(S.units === 'us' ? c * 9 / 5 + 32 : c) + '°';
+function renderWeather(w) {
+  const d = w.d; if (!d || !d.current) return;
+  $('wxCard').hidden = false;
+  $('wxTemp').textContent = tC(d.current.temperature_2m);
+  $('wxSky').textContent = WX[d.current.weather_code] || 'Weather';
+  const now = Date.now(), H = d.hourly;
+  const idx = H.time.findIndex((t) => new Date(t).getTime() > now - 3600000);
+  const next = H.time.slice(idx, idx + 6).map((t, i) => ({ t: new Date(t), temp: H.temperature_2m[idx + i], rain: H.precipitation_probability[idx + i] }));
+  const wet = next.find((h) => h.rain >= 50);
+  const sub = [`Feels like ${tC(d.current.apparent_temperature)}`];
+  sub.push(wet ? `Rain likely around ${wet.t.toLocaleTimeString([], { hour: 'numeric' })}` : `Rain ${Math.max(0, ...next.map((h) => h.rain || 0))}% next 6 h`);
+  if (d.current.uv_index >= 3) sub.push(`UV ${Math.round(d.current.uv_index)} ${uvWord(d.current.uv_index)}`);
+  $('wxSub').textContent = sub.join(' · ');
+  $('wxHrs').innerHTML = next.slice(0, 6).map((h) => `<div class="hr"><b>${tC(h.temp)}</b>${h.t.toLocaleTimeString([], { hour: 'numeric' })}<br>${h.rain || 0}%</div>`).join('');
+  const al = (w.alerts || [])[0];
+  $('wxAlert').hidden = !al;
+  if (al) $('wxAlert').innerHTML = `<b>${esc(al.ev)}</b>${w.alerts.length > 1 ? ` and ${w.alerts.length - 1} more` : ''}. Tap for details.`;
+}
+$('wxBtn').onclick = () => {
+  const w = store.get('wx', null); if (!w) return;
+  const d = w.d, D = d.daily;
+  const days = D.time.map((t, i) => `<div><span>${i === 0 ? 'Today' : new Date(t + 'T12:00').toLocaleDateString([], { weekday: 'long' })}</span><span>${WX[D.weather_code[i]] || ''}</span><span>${tC(D.temperature_2m_max[i])} / ${tC(D.temperature_2m_min[i])} · ${D.precipitation_probability_max[i]}% rain · UV ${Math.round(D.uv_index_max[i])}</span></div>`).join('');
+  const als = (w.alerts || []).map((a) => `<div class="wx-alert"><b>${esc(a.ev)}</b><br>${esc(a.head || '')}</div>`).join('');
+  const hot = d.current.apparent_temperature >= 32 ? `<p class="muted">Parked in the sun at this heat, the cabin can pass 130°F within an hour. Don't leave kids, pets, phones, sunscreen or aerosol cans inside.</p>` : '';
+  sheet(`<h3>Weather</h3>${als}<div class="wx-list">${days}</div>${hot}<p class="muted" style="font-size:12px">Forecast from Open-Meteo${(w.alerts || []).length ? ', alerts from the National Weather Service' : ''}. Updated ${new Date(w.t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.</p><div class="btn-row"><button class="btn" id="wxRefresh" type="button">Refresh</button><button class="btn primary" data-close type="button">Done</button></div>`);
+  $('wxRefresh').onclick = () => { closeSheet(); loadWeather(true); toast('Updating weather…'); };
+};
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') loadWeather(false); });
+setInterval(() => loadWeather(false), 10 * 60000);
+
+/* ---------- power and battery (inverter load vs the 12V socket and battery) ---------- */
+// 2018 Soul 12V socket: 20 A fuse, about 180 W continuous. Battery: assume ~270 Wh usable before it won't crank.
+const SOCKET_W = 180, BATTERY_WH = 270, INV_EFF = 0.85;
+function power() { return cstore.get('power', { outlet: 'socket', items: [] }); }
+function powerW() { return power().items.reduce((a, x) => a + (x.w || 0), 0); }
+function powerState() {
+  const v = st.vals.volt, rpm = st.vals.rpm, on = st.mode === 'live' || st.mode === 'demo';
+  const w = powerW(), pw = power(), run = rpm > 400;
+  if (on && v != null) {
+    if (run && v < 12.8) return { cls: 'crit', title: w ? 'Too much plugged in' : 'Battery isn\'t charging', text: w ? 'The alternator can\'t keep up. Unplug something from the inverter now.' : 'The alternator may be failing. Get the charging system tested.' };
+    if (run && v < 13.3) return { cls: 'warn', title: 'Charging is weak', text: w ? 'The electrical system is working hard. Unplug the biggest item or raise the idle by driving.' : 'Voltage is a little low for a running engine. Watch it.' };
+    if (!run && v < 12.0) return { cls: 'crit', title: 'Battery low, start the engine', text: 'Below 12.0 V with the engine off, the car may not start. Unplug things and start the engine now.' };
+    if (!run && v < 12.3) return { cls: 'warn', title: 'Battery draining', text: w ? `Running ${w} W with the engine off. Start the engine soon or unplug things.` : 'The battery is getting low with the engine off.' };
+    if (run) return { cls: 'ok', title: 'Charging normally', text: w ? `The alternator is handling the ${w} W you have plugged in.` : 'The alternator is charging the battery.' };
+    return { cls: 'ok', title: 'Battery OK', text: w ? `Engine off with ${w} W plugged in. Keep an eye on it.` : 'Battery voltage is healthy.' };
+  }
+  if (pw.outlet === 'socket' && w > SOCKET_W) return { cls: 'warn', title: 'Over the socket limit', text: `${w} W is more than the 12V socket's fuse handles (about ${SOCKET_W} W). It may blow the fuse.` };
+  return { cls: '', title: 'Battery', text: 'Connect to see live voltage.' };
+}
+function renderPower() {
+  const pw = power(), w = powerW(), s = powerState();
+  $('pwDot').className = 'dot ' + s.cls; $('pwTitle').textContent = s.title; $('pwText').textContent = s.text;
+  $('pwVolt').textContent = st.vals.volt != null ? fmt(st.vals.volt, 1) + ' V' : '–';
+  $('pwWatts').textContent = `${w} W`;
+  const hrs = w ? BATTERY_WH * INV_EFF / w : null;
+  $('pwHours').textContent = hrs == null ? '–' : hrs >= 24 ? 'a day+' : hrs >= 1 ? `~${fmt(hrs, hrs < 3 ? 1 : 0)} h` : `~${Math.round(hrs * 60)} min`;
+  const lim = pw.outlet === 'socket' ? SOCKET_W : 400;
+  const f = Math.min(1, w / lim);
+  $('pwBar').style.width = (f * 100) + '%';
+  $('pwBar').style.background = w > lim ? 'var(--crit)' : f > 0.8 ? 'var(--warn)' : 'var(--ok)';
+  $('pwLimit').textContent = pw.outlet === 'socket' ? `${w} of about ${SOCKET_W} W the 12V socket handles (${fmt(w / 12 / INV_EFF, 1)} A). The inverter says 400 W, but the socket's fuse is the real limit.` : `${w} of the inverter's 400 W (${fmt(w / 12 / INV_EFF, 0)} A from the battery). Run big loads with the engine on.`;
+  $('pwItems').innerHTML = pw.items.map((x, i) => `<button type="button" class="chip" data-i="${i}" aria-label="Remove ${esc(x.n)}">${esc(x.n)} · ${x.w} W <span aria-hidden="true">✕</span></button>`).join('');
+  $('pwItems').querySelectorAll('.chip').forEach((b) => b.onclick = () => { const p = power(); p.items.splice(+b.dataset.i, 1); cstore.set('power', p); renderPower(); lastAlerts = 0; });
+  document.querySelectorAll('#pwOutSeg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === pw.outlet)));
+}
+document.querySelectorAll('#pwOutSeg button').forEach((b) => b.onclick = () => { const p = power(); p.outlet = b.dataset.v; cstore.set('power', p); renderPower(); });
+$('pwAdd').onchange = () => {
+  let v = $('pwAdd').value; $('pwAdd').value = ''; if (!v) return;
+  if (v === 'custom') {
+    sheet(`<h3>Add a device</h3><div class="field"><label for="pwN">What is it?</label><input type="text" id="pwN" placeholder="e.g. Mini fridge"></div><div class="field"><label for="pwW">Watts (on its label or charger)</label><input type="text" inputmode="numeric" id="pwW" placeholder="e.g. 50"></div><div class="btn-row"><button class="btn" data-close type="button">Cancel</button><button class="btn primary" id="pwOk" type="button">Add</button></div>`);
+    $('pwOk').onclick = () => { const n = $('pwN').value.trim(), w = parseInt($('pwW').value, 10); if (!n || !(w > 0)) { toast('Add a name and watts'); return; } const p = power(); p.items.push({ n, w }); cstore.set('power', p); closeSheet(); renderPower(); };
+    return;
+  }
+  const [n, w] = v.split('|'); const p = power(); p.items.push({ n, w: +w }); cstore.set('power', p); renderPower();
+};
+
 /* ---------- backup / restore ---------- */
 function backupData() {
   const data = {};
@@ -1924,7 +2067,7 @@ $('restoreIn').onchange = async () => {
 };
 
 /* ---------- boot ---------- */
-seedRecord(); applyCar(); buildTiles(); buildGroups(); renderCare(); syncNotif();
+seedRecord(); applyCar(); buildTiles(); buildGroups(); renderCare(); renderPower(); syncNotif(); loadWeather(false);
 renderPark();
 // open in demo so the first view shows what the app does; real connection replaces it
 if (store.get('demo', true)) startDemo(); else { render(); renderCodes(); }
